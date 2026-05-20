@@ -1,0 +1,174 @@
+spring:
+  application:
+    name: properia-api
+
+  profiles:
+    active: ${APP_ENV:dev}
+
+  # ── JPA / Hibernate ─────────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate          # Flyway owns the schema — Hibernate only validates
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: properia  # All tables live in the properia schema
+        jdbc:
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        batch_size: 25
+
+  # ── Flyway ───────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    schemas: properia
+    default-schema: properia
+    baseline-on-migrate: false    # DB is already set up — do NOT baseline in production
+    out-of-order: false
+    validate-on-migrate: true
+
+  # ── Jackson ──────────────────────────────────────────────────────────────────
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: UTC
+
+  # ── Task execution (Virtual Threads) ─────────────────────────────────────────
+  threads:
+    virtual:
+      enabled: true               # Java 21+ / 25 Virtual Threads for all async tasks
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+  port: ${PORT:8080}
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/plain
+    min-response-size: 2048
+  error:
+    include-message: never        # Never leak internal error messages to clients
+    include-stacktrace: never
+    include-binding-errors: never
+
+# ── Actuator ──────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      environment: ${APP_ENV:dev}
+
+# ── OpenAPI / Swagger ─────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+    display-request-duration: true
+
+# ── JWT ───────────────────────────────────────────────────────────────────────
+properia:
+  jwt:
+    secret: ${AUTH_SESSION_SECRET:replace_me_with_a_long_random_secret_at_least_32_chars}
+    ttl-seconds: ${AUTH_SESSION_TTL_SECONDS:28800}
+    issuer: properia
+    audience: properia-web
+    cookie-name: properia_session
+    cookie-domain: ${AUTH_COOKIE_DOMAIN:}
+    cookie-secure: ${COOKIE_SECURE:false}
+
+  # ── External service URLs ─────────────────────────────────────────────────
+  overpass:
+    url: ${OVERPASS_API_URL:https://overpass-api.de/api/interpreter}
+    timeout-ms: ${OVERPASS_TIMEOUT_MS:12000}
+    retry-attempts: ${OVERPASS_RETRY_ATTEMPTS:3}
+    retry-base-delay-ms: ${OVERPASS_RETRY_BASE_DELAY_MS:800}
+
+  geocoding:
+    url: ${GEOCODING_API_URL:https://nominatim.openstreetmap.org/search}
+    timeout-ms: ${GEOCODING_TIMEOUT_MS:7000}
+    user-agent: ${GEOCODING_USER_AGENT:ProperiaApi/1.0}
+
+  openroute:
+    url: ${OPENROUTESERVICE_MATRIX_URL:https://api.openrouteservice.org/v2/matrix/driving-car}
+    api-key: ${OPENROUTESERVICE_API_KEY:}
+
+  gemini:
+    url: ${GEMINI_API_URL:https://generativelanguage.googleapis.com/v1beta}
+    api-key: ${GEMINI_API_KEY:}
+    zone-model: ${GEMINI_ZONE_MODEL:gemini-2.5-flash}
+
+  openai:
+    url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${OPENAI_API_KEY:}
+    vision-model: ${OPENAI_VISION_MODEL:gpt-4.1-mini}
+    zone-model: ${OPENAI_ZONE_MODEL:gpt-4o-mini}
+    vision-timeout-ms: ${OPENAI_VISION_TIMEOUT_MS:20000}
+    vision-max-images: ${OPENAI_VISION_MAX_IMAGES:6}
+
+  anthropic:
+    api-key: ${ANTHROPIC_API_KEY:}
+
+  media:
+    provider: ${MEDIA_UPLOAD_PROVIDER:local}
+    local-base-url: ${MEDIA_LOCAL_UPLOAD_BASE_URL:http://localhost:8080/uploads}
+    cdn-base-url: ${MEDIA_CDN_BASE_URL:}
+    r2:
+      account-id: ${CF_R2_ACCOUNT_ID:}
+      access-key-id: ${CF_R2_ACCESS_KEY_ID:}
+      secret-access-key: ${CF_R2_SECRET_ACCESS_KEY:}
+      bucket: ${CF_R2_BUCKET_MEDIA:}
+
+  storage:
+    # Public base URL of the R2 bucket — used by MediaController to build upload/public URLs.
+    # In prod: set to the R2 public URL or custom media domain (e.g. https://media.properia.pt).
+    bucket-url: ${MEDIA_CDN_BASE_URL:}
+
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    credits-webhook-secret: ${STRIPE_CREDITS_WEBHOOK_SECRET:}
+    billing-provider: ${BILLING_PROVIDER:fake}
+
+  email:
+    resend-api-key: ${RESEND_API_KEY:}
+    from: ${EMAIL_FROM:"Properia <noreply@properia.pt>"}
+
+  worker:
+    poll-interval-ms: ${WORKER_POLL_INTERVAL_MS:4000}
+    job-max-attempts: ${JOB_MAX_ATTEMPTS:3}
+    job-retry-base-delay-ms: ${JOB_RETRY_BASE_DELAY_MS:1500}
+
+  admin:
+    allowed-emails: ${AUTH_ALLOWED_ADMIN_EMAILS:admin@properia.pt}
+
+  app:
+    url: ${APP_URL:http://localhost:3000}
+
+  oauth:
+    issuer-url: ${AUTH_ISSUER_URL:https://accounts.google.com}
+    client-id: ${AUTH_CLIENT_ID:}
+    client-secret: ${AUTH_CLIENT_SECRET:}
+    redirect-uri: ${AUTH_CALLBACK_URL:http://localhost:8080/api/auth/callback}
+    provider-timeout-ms: ${AUTH_PROVIDER_TIMEOUT_MS:5000}

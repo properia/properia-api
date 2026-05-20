@@ -1,0 +1,36 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/properia?currentSchema=properia}
+    username: ${POSTGRES_USER:properia}
+    password: ${POSTGRES_PASSWORD:properia_dev_password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+      pool-name: ProperiaHikari-Dev
+
+  jpa:
+    show-sql: true
+
+  flyway:
+    baseline-on-migrate: false  # Do not re-baseline; flyway_schema_history is already seeded at V26
+
+server:
+  error:
+    include-message: always     # Show full error messages in dev
+    include-stacktrace: on-param
+
+logging:
+  level:
+    pt.properia: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
+    org.flywaydb: INFO
+
+properia:
+  jwt:
+    cookie-secure: false        # No HTTPS needed in dev
+  stripe:
+    billing-provider: fake      # Use fake Stripe in dev

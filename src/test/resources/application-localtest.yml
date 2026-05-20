@@ -1,0 +1,23 @@
+# Profile for running tests against the local dev postgres (no Testcontainers needed)
+# Usage: mvn test -Dspring.profiles.active=localtest
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/properia_test?currentSchema=properia
+    username: properia
+    password: properia_dev_password
+  flyway:
+    baseline-on-migrate: true
+    schemas: properia
+    default-schema: properia
+    url: jdbc:postgresql://localhost:5432/properia_test
+    user: properia
+    password: properia_dev_password
+  jpa:
+    show-sql: false
+
+properia:
+  jwt:
+    secret: test-secret-at-least-32-characters-long-for-hmac
+    cookie-secure: false
+  stripe:
+    billing-provider: fake

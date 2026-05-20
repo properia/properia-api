@@ -1,0 +1,124 @@
+services:
+
+  # ── PostgreSQL 16 ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: properia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-properia}
+      POSTGRES_USER: ${POSTGRES_USER:-properia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-properia_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-properia} -d ${POSTGRES_DB:-properia}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Java Spring Boot API ──────────────────────────────────────────────────
+  properia-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: properia-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-properia}?currentSchema=properia
+      POSTGRES_DB: ${POSTGRES_DB:-properia}
+      POSTGRES_USER: ${POSTGRES_USER:-properia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-properia_dev_password}
+      # Auth
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-replace_me_with_a_long_random_secret_at_least_32_chars}
+      AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-28800}
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+      AUTH_ALLOWED_ADMIN_EMAILS: ${AUTH_ALLOWED_ADMIN_EMAILS:-admin@properia.pt}
+      # External APIs
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENROUTESERVICE_API_KEY: ${OPENROUTESERVICE_API_KEY:-}
+      # Stripe
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
+      # Media
+      MEDIA_UPLOAD_PROVIDER: ${MEDIA_UPLOAD_PROVIDER:-local}
+      CF_R2_ACCOUNT_ID: ${CF_R2_ACCOUNT_ID:-}
+      CF_R2_ACCESS_KEY_ID: ${CF_R2_ACCESS_KEY_ID:-}
+      CF_R2_SECRET_ACCESS_KEY: ${CF_R2_SECRET_ACCESS_KEY:-}
+      CF_R2_BUCKET_MEDIA: ${CF_R2_BUCKET_MEDIA:-}
+      MEDIA_CDN_BASE_URL: ${MEDIA_CDN_BASE_URL:-}
+      # Email
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Sentry
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────────
+  properia-fe:
+    build:
+      context: ../properia-FE
+      dockerfile: Dockerfile
+      args:
+        # Baked at build time: SSR fetches hit the Java API directly on the Docker network.
+        # Browser requests use relative /api/* paths and never see this value.
+        NEXT_PUBLIC_API_URL: http://properia-api:8080
+    container_name: properia-fe
+    restart: unless-stopped
+    depends_on:
+      properia-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-prod}
+      APP_URL: ${APP_URL:-http://localhost}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:3000/ 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: properia-nginx
+    restart: unless-stopped
+    depends_on:
+      properia-api:
+        condition: service_healthy
+      properia-fe:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/properia.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
