@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: ${DATABASE_URL}
+    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL}}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 1
@@ -9,14 +9,15 @@ spring:
       idle-timeout: 300000
       max-lifetime: 1200000
       pool-name: ProperiaHikari-Prod
+      connection-init-sql: "SET statement_timeout = 0"
 
   jpa:
     show-sql: false
 
   flyway:
-    baseline-on-migrate: false  # NEVER auto-baseline in production
-    connect-retries: 5
-    connect-retries-interval: 5s
+    baseline-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 10s
 
 server:
   error:
