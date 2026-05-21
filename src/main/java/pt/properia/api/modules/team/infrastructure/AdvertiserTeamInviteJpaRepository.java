@@ -3,6 +3,7 @@ package pt.properia.api.modules.team.infrastructure;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.team.domain.AdvertiserTeamInvite;
 
 import java.util.List;
@@ -18,6 +19,7 @@ public interface AdvertiserTeamInviteJpaRepository extends JpaRepository<Adverti
     Optional<AdvertiserTeamInvite> findByToken(String token);
 
     @Modifying
+    @Transactional
     @Query("DELETE FROM AdvertiserTeamInvite i WHERE i.advertiserId = :advertiserId AND i.email = :email AND i.acceptedAt IS NULL")
     void deletePendingByAdvertiserAndEmail(UUID advertiserId, String email);
 }

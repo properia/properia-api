@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.auth.domain.AuthActionToken;
 
 import java.time.Instant;
@@ -18,6 +19,7 @@ interface AuthActionTokenJpaRepository extends JpaRepository<AuthActionToken, UU
                                               @Param("now") Instant now);
 
     @Modifying
+    @Transactional
     @Query("UPDATE AuthActionToken t SET t.consumedAt = :now WHERE t.userId = :userId AND t.purpose = :purpose AND t.consumedAt IS NULL")
     void invalidateByUserAndPurpose(@Param("userId") UUID userId,
                                     @Param("purpose") String purpose,
