@@ -21,7 +21,7 @@ CREATE TYPE "properia"."moderation_target_type" AS ENUM('listing', 'advertiser')
 DO $$ BEGIN CREATE TYPE "properia"."professional_registration_type" AS ENUM('ami', 'commercial_reference'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TYPE "properia"."visit_meeting_provider" AS ENUM('google_meet', 'zoom', 'teams', 'custom');;
 CREATE TYPE "properia"."visit_meeting_sync_status" AS ENUM('pending', 'synced', 'failed', 'manual');;
-ALTER TYPE "properia"."consent_purpose" ADD VALUE 'partner_data_sharing';;
+ALTER TYPE "properia"."consent_purpose" ADD VALUE IF NOT EXISTS 'partner_data_sharing';;
 CREATE TABLE IF NOT EXISTS "properia"."advertiser_calendar_connections" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"advertiser_id" uuid NOT NULL,
