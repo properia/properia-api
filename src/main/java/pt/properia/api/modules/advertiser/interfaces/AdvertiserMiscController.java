@@ -354,13 +354,12 @@ public class AdvertiserMiscController {
         // Return overdue leads as automation tasks (same logic as pulse)
         var tasks = jdbc.sql("""
                 SELECT l.id, l.contact_name, l.stage, l.listing_id, l.created_at,
-                       l.next_follow_up_at, li.title as listing_title
+                       li.title as listing_title
                 FROM properia.leads l
                 LEFT JOIN properia.listings li ON li.id = l.listing_id
                 WHERE l.advertiser_id = :adv
-                  AND l.stage NOT IN ('closed_won', 'closed_lost')
-                  AND (l.next_follow_up_at < now() OR l.stage = 'new')
-                ORDER BY COALESCE(l.next_follow_up_at, l.created_at) ASC
+                  AND l.stage NOT IN ('won', 'lost')
+                ORDER BY l.created_at ASC
                 LIMIT 20
                 """).param("adv", advertiserId)
             .query((rs, n) -> {
@@ -371,9 +370,7 @@ public class AdvertiserMiscController {
                 m.put("title", "Seguimento: " + Optional.ofNullable(rs.getString("contact_name")).orElse("Lead"));
                 m.put("description", Optional.ofNullable(rs.getString("listing_title")).orElse(""));
                 m.put("stage", rs.getString("stage"));
-                m.put("dueAt", rs.getTimestamp("next_follow_up_at") != null
-                    ? rs.getTimestamp("next_follow_up_at").toInstant().toString()
-                    : rs.getTimestamp("created_at").toInstant().toString());
+                m.put("dueAt", rs.getTimestamp("created_at").toInstant().toString());
                 m.put("priority", "new".equals(rs.getString("stage")) ? "high" : "medium");
                 return (Map<String, Object>) m;
             }).list();

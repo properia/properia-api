@@ -38,11 +38,11 @@ public class AdvertiserMetricsService {
         // leads by stage, source, created_at, listing price
         var leadRows = jdbc.sql("""
                 SELECT l.id, l.stage, l.source, l.created_at,
-                       p.amount AS price_amount
+                       COALESCE(p.list_price, 0) AS price_amount
                 FROM properia.leads l
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = l.listing_id
                 WHERE l.advertiser_id = :adv
-                  AND (:source IS NULL OR l.source = :source)
+                  AND (:source IS NULL OR l.source::text = :source)
                 """)
             .param("adv", advertiserId)
             .param("source", (source != null && !source.equals("todas")) ? source : null)
@@ -139,8 +139,8 @@ public class AdvertiserMetricsService {
                        COUNT(DISTINCT l.id) AS leads_total,
                        COUNT(DISTINCT CASE WHEN l.stage = 'new' THEN l.id END) AS leads_new,
                        COUNT(DISTINCT CASE WHEN v.status = 'confirmed' THEN v.id END) AS visits_confirmed,
-                       COALESCE(p.amount, 0) AS price_amount,
-                       COALESCE(p.currency_code, 'EUR') AS currency_code
+                       COALESCE(p.list_price, 0) AS price_amount,
+                       COALESCE(p.price_currency, 'EUR') AS currency_code
                 FROM properia.listings li
                 LEFT JOIN properia.leads l ON l.listing_id = li.id
                 LEFT JOIN properia.visits v ON v.lead_id = l.id
@@ -177,14 +177,14 @@ public class AdvertiserMetricsService {
                        COUNT(DISTINCT l.id) AS leads_total,
                        COUNT(DISTINCT CASE WHEN l.stage = 'won' THEN l.id END) AS leads_won,
                        COUNT(DISTINCT li.id) AS listings_total,
-                       COUNT(DISTINCT CASE WHEN li.status = 'active' THEN li.id END) AS listings_active,
+                       COUNT(DISTINCT CASE WHEN li.status = 'published' THEN li.id END) AS listings_active,
                        COUNT(DISTINCT v.id) AS visits_total,
                        COUNT(DISTINCT CASE WHEN v.status = 'confirmed' THEN v.id END) AS visits_confirmed
                 FROM properia.advertiser_users au
                 JOIN properia.app_users u ON u.id = au.user_id
-                LEFT JOIN properia.leads l ON l.advertiser_id = :adv AND l.assigned_to_user_id = u.id
-                LEFT JOIN properia.listings li ON li.advertiser_id = :adv AND li.agent_user_id = u.id
-                LEFT JOIN properia.visits v ON v.advertiser_id = :adv AND v.assigned_to_user_id = u.id
+                LEFT JOIN properia.leads l ON l.advertiser_id = :adv AND l.assigned_to = u.id
+                LEFT JOIN properia.listings li ON li.advertiser_id = :adv AND li.owner_user_id = u.id
+                LEFT JOIN properia.visits v ON v.lead_id = l.id
                 WHERE au.advertiser_id = :adv
                 GROUP BY u.id, u.full_name, u.avatar_url, au.membership_role
                 ORDER BY leads_total DESC
