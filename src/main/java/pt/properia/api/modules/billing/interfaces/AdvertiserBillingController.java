@@ -111,6 +111,7 @@ public class AdvertiserBillingController {
         var data = new LinkedHashMap<String, Object>();
         data.put("advertiserId", advertiserId.toString());
         data.put("advertiserName", advertiserName != null ? advertiserName : "Anunciante");
+        data.put("planCode", planCode);
         data.put("basePlanCode", planCode);
         data.put("effectivePlanCode", planCode);
         data.put("planLabel", planLabel(planCode));

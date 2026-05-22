@@ -113,7 +113,7 @@ public class JdbcSearchRepository implements SearchRepository {
 
         // Business type
         if (p.negocio() != null && !p.negocio().isBlank() && !"todos".equals(p.negocio())) {
-            parts.add("l.business_type = :businessType");
+            parts.add("l.business_type::text = :businessType");
             params.put("businessType", mapBusinessType(p.negocio()));
         }
 
@@ -124,7 +124,7 @@ public class JdbcSearchRepository implements SearchRepository {
                 .filter(t -> t != null && !t.isBlank())
                 .toList();
             if (!types.isEmpty()) {
-                parts.add("l.property_type = ANY(:propertyTypes)");
+                parts.add("l.property_type::text = ANY(:propertyTypes)");
                 params.put("propertyTypes", types.toArray(String[]::new));
             }
         }
@@ -187,14 +187,14 @@ public class JdbcSearchRepository implements SearchRepository {
         if (p.mobilia() != null && !p.mobilia().isEmpty()) {
             var mapped = p.mobilia().stream().map(this::mapMobilia).filter(m -> m != null).toList();
             if (!mapped.isEmpty()) {
-                parts.add("l.furnished_final = ANY(:mobilia)");
+                parts.add("l.furnished_final::text = ANY(:mobilia)");
                 params.put("mobilia", mapped.toArray(String[]::new));
             }
         }
 
         // Condition status
         if (p.conditionStatus() != null && !p.conditionStatus().isEmpty()) {
-            parts.add("l.condition_final = ANY(:conditionStatus)");
+            parts.add("l.condition_final::text = ANY(:conditionStatus)");
             params.put("conditionStatus", p.conditionStatus().toArray(String[]::new));
         }
 

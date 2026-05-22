@@ -57,7 +57,64 @@ public class VisitController {
     @GetMapping("/api/visitas")
     public ResponseEntity<?> listForBuyer(@AuthenticationPrincipal JwtClaims claims) {
         requireAuth(claims);
-        return ResponseEntity.ok(Map.of("data", getVisits.forBuyer(claims.userId())));
+        var items = jdbc.sql("""
+                SELECT v.id, v.status, v.mode, v.starts_at, v.ends_at,
+                       v.meeting_url, v.notes, v.created_at, v.updated_at,
+                       li.id AS li_id, li.public_id AS li_public_id, li.title AS li_title,
+                       li.city AS li_city, li.neighborhood AS li_neighborhood,
+                       li.district AS li_district, li.hero_image_url AS li_hero,
+                       li.price_amount AS li_price, li.business_type AS li_bt,
+                       li.bedrooms AS li_bedrooms, li.bathrooms AS li_bathrooms,
+                       li.usable_area_m2 AS li_area, li.has_garage AS li_garage,
+                       a.id AS adv_id, a.brand_name AS adv_name,
+                       a.contact_email AS adv_email, a.contact_phone AS adv_phone
+                FROM properia.visits v
+                LEFT JOIN properia.listings li ON li.id = v.listing_id
+                LEFT JOIN properia.advertisers a ON a.id = li.advertiser_id
+                WHERE v.buyer_user_id = :uid
+                ORDER BY v.starts_at DESC
+                """).param("uid", claims.userId())
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("id", rs.getString("id"));
+                m.put("status", rs.getString("status"));
+                m.put("mode", rs.getString("mode"));
+                m.put("startsAt", rs.getTimestamp("starts_at") != null ? rs.getTimestamp("starts_at").toInstant().toString() : null);
+                m.put("endsAt", rs.getTimestamp("ends_at") != null ? rs.getTimestamp("ends_at").toInstant().toString() : null);
+                m.put("meetingUrl", rs.getString("meeting_url"));
+                m.put("meetingProvider", null);
+                m.put("externalCalendarEventId", null);
+                m.put("meetingCreatedAt", null);
+                m.put("meetingSyncStatus", null);
+                m.put("notes", rs.getString("notes"));
+                m.put("statusReason", null);
+                m.put("buyerConfirmedAt", null);
+                m.put("buyerConfirmationRequestedAt", null);
+                var listing = new java.util.LinkedHashMap<String, Object>();
+                listing.put("id", Optional.ofNullable(rs.getString("li_id")).orElse(""));
+                listing.put("publicId", Optional.ofNullable(rs.getString("li_public_id")).orElse(""));
+                listing.put("title", Optional.ofNullable(rs.getString("li_title")).orElse("Imóvel"));
+                listing.put("city", rs.getString("li_city"));
+                listing.put("neighborhood", rs.getString("li_neighborhood"));
+                listing.put("district", rs.getString("li_district"));
+                listing.put("heroImageUrl", rs.getString("li_hero"));
+                listing.put("priceAmount", rs.getObject("li_price"));
+                listing.put("businessType", Optional.ofNullable(rs.getString("li_bt")).orElse("sale"));
+                listing.put("bedrooms", rs.getObject("li_bedrooms"));
+                listing.put("bathrooms", rs.getObject("li_bathrooms"));
+                listing.put("usableAreaM2", rs.getObject("li_area"));
+                listing.put("hasGarage", rs.getBoolean("li_garage"));
+                m.put("listing", listing);
+                var advertiser = new java.util.LinkedHashMap<String, Object>();
+                advertiser.put("id", Optional.ofNullable(rs.getString("adv_id")).orElse(""));
+                advertiser.put("name", Optional.ofNullable(rs.getString("adv_name")).orElse("Anunciante"));
+                advertiser.put("email", rs.getString("adv_email"));
+                advertiser.put("phone", rs.getString("adv_phone"));
+                advertiser.put("logoUrl", null);
+                m.put("advertiser", advertiser);
+                return (Map<String, Object>) m;
+            }).list();
+        return ResponseEntity.ok(Map.of("data", Map.of("items", items)));
     }
 
     @GetMapping("/api/visitas/listing/{listingId}")

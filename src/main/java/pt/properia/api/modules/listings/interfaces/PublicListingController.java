@@ -61,8 +61,8 @@ public class PublicListingController {
                        hero_image_url, published_at
                 FROM properia.listings
                 WHERE status = 'published'
-                  AND business_type = :bt
-                  AND property_type = :pt
+                  AND business_type::text = :bt
+                  AND property_type::text = :pt
                   AND id != :id
                   AND (:district = '' OR district = :district)
                 ORDER BY RANDOM() LIMIT 6
@@ -149,15 +149,22 @@ public class PublicListingController {
             throw new DomainException("NOT_FOUND", "Imóvel não encontrado.", 404);
         }
 
-        var items = jdbc.sql("""
-                SELECT price_amount, price_currency, recorded_at
-                FROM properia.listing_price_history WHERE listing_id = :id ORDER BY recorded_at ASC
-                """).param("id", id)
-            .query((rs, n) -> Map.of(
-                "priceAmount", rs.getDouble("price_amount"),
-                "priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"),
-                "recordedAt", rs.getTimestamp("recorded_at").toInstant().toString()
-            )).list();
+        List<Map<String, Object>> items;
+        try {
+            items = jdbc.sql("""
+                    SELECT price_amount, price_currency, recorded_at
+                    FROM properia.listing_price_history WHERE listing_id = :id ORDER BY recorded_at ASC
+                    """).param("id", id)
+                .query((rs, n) -> {
+                    var m = new LinkedHashMap<String, Object>();
+                    m.put("priceAmount", rs.getDouble("price_amount"));
+                    m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                    m.put("recordedAt", rs.getTimestamp("recorded_at").toInstant().toString());
+                    return (Map<String, Object>) m;
+                }).list();
+        } catch (Exception ignored) {
+            items = List.of();
+        }
 
         var currentPrice = listing.get().get("priceAmount") != null
             ? ((Number) listing.get().get("priceAmount")).doubleValue() : null;
@@ -319,8 +326,8 @@ public class PublicListingController {
                 WHERE status = 'published'
                   AND (LOWER(city) LIKE :loc OR LOWER(neighborhood) LIKE :loc
                     OR LOWER(parish) LIKE :loc OR LOWER(district) LIKE :loc)
-                  AND (:bt IS NULL OR business_type = :bt)
-                  AND (:pt IS NULL OR property_type = :pt)
+                  AND (:bt IS NULL OR business_type::text = :bt)
+                  AND (:pt IS NULL OR property_type::text = :pt)
                   AND (:priceMin IS NULL OR price_amount::numeric >= :priceMin)
                   AND (:priceMax IS NULL OR price_amount::numeric <= :priceMax)
                 ORDER BY published_at DESC LIMIT :lim
