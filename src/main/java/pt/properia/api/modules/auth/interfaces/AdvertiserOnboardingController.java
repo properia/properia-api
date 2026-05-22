@@ -92,8 +92,8 @@ public class AdvertiserOnboardingController {
 
         jdbc.sql("""
                 INSERT INTO properia.advertisers
-                  (id, brand_name, slug, advertiser_type, verification_status, is_active, created_at, updated_at)
-                VALUES (:id, :name, :slug, :type::properia.advertiser_type, 'pending_review', false, now(), now())
+                  (id, brand_name, legal_name, slug, advertiser_type, verification_status, is_active, created_at, updated_at)
+                VALUES (:id, :name, :name, :slug, :type::properia.advertiser_type, 'pending_review', false, now(), now())
                 """)
             .param("id", id).param("name", brandName).param("slug", slug)
             .param("type", advertiserType).update();
