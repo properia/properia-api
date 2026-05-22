@@ -1,6 +1,5 @@
 package pt.properia.api.modules.advertiser.application;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -17,10 +16,6 @@ public class AdvertiserMetricsService {
         this.jdbc = jdbc;
     }
 
-    public record FunnelDto(
-        @JsonProperty("new") int n,
-        int contacted, int qualified, int proposal, int won, int lost
-    ) {}
     public record CohortDto(int today, int last7Days, int last30Days) {}
     public record FinancialDto(long pipelineValue, long proposalValue, long wonValue,
                                long averageProposalValue, double proposalToWinRate) {}
@@ -31,7 +26,7 @@ public class AdvertiserMetricsService {
         int visitsRequested, int visitsConfirmed,
         double visitConversionRate, double winRate,
         double responseRate, Integer avgFirstResponseMinutes,
-        FunnelDto funnel, CohortDto cohort, FinancialDto financial,
+        Map<String, Object> funnel, CohortDto cohort, FinancialDto financial,
         List<SourceBreakdownItem> sourceBreakdown,
         List<Object> closeReasons
     ) {}
@@ -134,7 +129,8 @@ public class AdvertiserMetricsService {
             (int) visitsRequested, (int) visitsConfirmed,
             visitConversionRate, winRate,
             0.0, null,
-            new FunnelDto(nw, contacted, qualified, proposal, won, lost),
+            Map.of("new", nw, "contacted", contacted, "qualified", qualified,
+                   "proposal", proposal, "won", won, "lost", lost),
             new CohortDto(today, last7, last30),
             new FinancialDto(pipelineValue, proposalValue, wonValue, avgProposalValue, proposalToWinRate),
             breakdown,
