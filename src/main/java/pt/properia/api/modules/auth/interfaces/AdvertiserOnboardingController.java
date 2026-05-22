@@ -49,9 +49,8 @@ public class AdvertiserOnboardingController {
         params.put("id", advertiserId);
 
         if (body.containsKey("brandName")) { sets.add("brand_name = :brandName"); params.put("brandName", body.get("brandName")); }
-        if (body.containsKey("website")) { sets.add("website = :website"); params.put("website", body.get("website")); }
+        if (body.containsKey("website")) { sets.add("website_url = :website"); params.put("website", body.get("website")); }
         if (body.containsKey("phone")) { sets.add("phone = :phone"); params.put("phone", body.get("phone")); }
-        if (body.containsKey("description")) { sets.add("description = :description"); params.put("description", body.get("description")); }
         if (body.containsKey("advertiserType")) { sets.add("advertiser_type = :advertiserType::properia.advertiser_type"); params.put("advertiserType", body.get("advertiserType")); }
         if (body.containsKey("licenseNumber")) { sets.add("license_number = :licenseNumber"); params.put("licenseNumber", body.get("licenseNumber")); }
         if (body.containsKey("logoUrl")) { sets.add("logo_url = :logoUrl"); params.put("logoUrl", body.get("logoUrl")); }
@@ -111,7 +110,7 @@ public class AdvertiserOnboardingController {
     private Map<String, Object> loadOnboarding(UUID userId) {
         return jdbc.sql("""
                 SELECT a.id, a.brand_name, a.slug, a.advertiser_type, a.verification_status,
-                       a.is_active, a.license_number, a.phone, a.website, a.description, a.logo_url,
+                       a.is_active, a.license_number, a.phone, a.website_url, a.logo_url,
                        a.created_at, au.membership_role
                 FROM properia.advertisers a
                 JOIN properia.advertiser_users au ON au.advertiser_id = a.id
@@ -128,8 +127,7 @@ public class AdvertiserOnboardingController {
                 m.put("isActive", rs.getBoolean("is_active"));
                 m.put("licenseNumber", rs.getString("license_number"));
                 m.put("phone", rs.getString("phone"));
-                m.put("website", rs.getString("website"));
-                m.put("description", rs.getString("description"));
+                m.put("website", rs.getString("website_url"));
                 m.put("logoUrl", rs.getString("logo_url"));
                 m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
                 m.put("status", "active");
