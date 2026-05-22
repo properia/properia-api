@@ -1,5 +1,6 @@
 package pt.properia.api.modules.advertiser.application;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -16,17 +17,23 @@ public class AdvertiserMetricsService {
         this.jdbc = jdbc;
     }
 
-    public record FunnelDto(int n, int contacted, int qualified, int proposal, int won, int lost) {}
+    public record FunnelDto(
+        @JsonProperty("new") int n,
+        int contacted, int qualified, int proposal, int won, int lost
+    ) {}
     public record CohortDto(int today, int last7Days, int last30Days) {}
-    public record FinancialDto(long pipelineValue, long proposalValue, long wonValue) {}
+    public record FinancialDto(long pipelineValue, long proposalValue, long wonValue,
+                               long averageProposalValue, double proposalToWinRate) {}
     public record SourceBreakdownItem(String source, int total) {}
 
     public record MetricsDto(
-        int leadsTotal, int leadsFresh, int leadsLate,
+        int leadsTotal, int leadsFresh, int leadsLate, int leadsUnread,
         int visitsRequested, int visitsConfirmed,
         double visitConversionRate, double winRate,
+        double responseRate, Integer avgFirstResponseMinutes,
         FunnelDto funnel, CohortDto cohort, FinancialDto financial,
-        List<SourceBreakdownItem> sourceBreakdown
+        List<SourceBreakdownItem> sourceBreakdown,
+        List<Object> closeReasons
     ) {}
 
     public MetricsDto getMetrics(UUID advertiserId, String source) {
@@ -60,7 +67,7 @@ public class AdvertiserMetricsService {
                 FROM properia.visits v
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.advertiser_id = :adv
-                  AND (:source IS NULL OR l.source = :source)
+                  AND (:source IS NULL OR l.source::text = :source)
                 GROUP BY v.status
                 """)
             .param("adv", advertiserId)
@@ -115,15 +122,23 @@ public class AdvertiserMetricsService {
 
         double visitConversionRate = total > 0 ? Math.round((double) (visitsRequested + visitsConfirmed) / total * 1000) / 10.0 : 0;
         double winRate = total > 0 ? Math.round((double) won / total * 1000) / 10.0 : 0;
+        long avgProposalValue = proposal > 0 ? proposalValue / proposal : 0;
+        double proposalToWinRate = proposal > 0 ? Math.round((double) won / proposal * 1000) / 10.0 : 0;
 
         return new MetricsDto(
-            total, 0, 0,
+            total, today, (int) leadRows.stream().filter(r -> {
+                var age = ChronoUnit.HOURS.between((Instant) r[2], Instant.now());
+                return age >= 72 && !"won".equals(r[0]) && !"lost".equals(r[0]);
+            }).count(),
+            0,
             (int) visitsRequested, (int) visitsConfirmed,
             visitConversionRate, winRate,
+            0.0, null,
             new FunnelDto(nw, contacted, qualified, proposal, won, lost),
             new CohortDto(today, last7, last30),
-            new FinancialDto(pipelineValue, proposalValue, wonValue),
-            breakdown
+            new FinancialDto(pipelineValue, proposalValue, wonValue, avgProposalValue, proposalToWinRate),
+            breakdown,
+            List.of()
         );
     }
 

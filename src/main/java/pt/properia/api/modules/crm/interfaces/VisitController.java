@@ -61,17 +61,15 @@ public class VisitController {
                 SELECT v.id, v.status, v.mode, v.starts_at, v.ends_at,
                        v.meeting_url, v.notes, v.created_at, v.updated_at,
                        li.id AS li_id, li.public_id AS li_public_id, li.title AS li_title,
-                       li.city AS li_city, li.neighborhood AS li_neighborhood,
-                       li.district AS li_district, li.hero_image_url AS li_hero,
-                       li.price_amount AS li_price, li.business_type AS li_bt,
-                       li.bedrooms AS li_bedrooms, li.bathrooms AS li_bathrooms,
-                       li.usable_area_m2 AS li_area, li.has_garage AS li_garage,
+                       li.city AS li_city, li.district AS li_district, li.hero_image_url AS li_hero,
+                       li.business_type AS li_bt,
                        a.id AS adv_id, a.brand_name AS adv_name,
-                       a.contact_email AS adv_email, a.contact_phone AS adv_phone
+                       a.email AS adv_email, a.phone AS adv_phone
                 FROM properia.visits v
+                JOIN properia.leads l ON l.id = v.lead_id
                 LEFT JOIN properia.listings li ON li.id = v.listing_id
-                LEFT JOIN properia.advertisers a ON a.id = li.advertiser_id
-                WHERE v.buyer_user_id = :uid
+                LEFT JOIN properia.advertisers a ON a.id = v.advertiser_id
+                WHERE l.user_id = :uid
                 ORDER BY v.starts_at DESC
                 """).param("uid", claims.userId())
             .query((rs, n) -> {
@@ -95,15 +93,9 @@ public class VisitController {
                 listing.put("publicId", Optional.ofNullable(rs.getString("li_public_id")).orElse(""));
                 listing.put("title", Optional.ofNullable(rs.getString("li_title")).orElse("Imóvel"));
                 listing.put("city", rs.getString("li_city"));
-                listing.put("neighborhood", rs.getString("li_neighborhood"));
                 listing.put("district", rs.getString("li_district"));
                 listing.put("heroImageUrl", rs.getString("li_hero"));
-                listing.put("priceAmount", rs.getObject("li_price"));
                 listing.put("businessType", Optional.ofNullable(rs.getString("li_bt")).orElse("sale"));
-                listing.put("bedrooms", rs.getObject("li_bedrooms"));
-                listing.put("bathrooms", rs.getObject("li_bathrooms"));
-                listing.put("usableAreaM2", rs.getObject("li_area"));
-                listing.put("hasGarage", rs.getBoolean("li_garage"));
                 m.put("listing", listing);
                 var advertiser = new java.util.LinkedHashMap<String, Object>();
                 advertiser.put("id", Optional.ofNullable(rs.getString("adv_id")).orElse(""));

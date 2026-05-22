@@ -296,7 +296,7 @@ public class LeadController {
                 m.put("contactPhone", rs.getString("contact_phone"));
                 m.put("stage", rs.getString("stage"));
                 m.put("source", rs.getString("source"));
-                m.put("internalNotes", rs.getString("internal_notes"));
+                m.put("internalNotes", null);
                 m.put("assignedToUserId", rs.getString("assigned_to"));
                 m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
                 m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());

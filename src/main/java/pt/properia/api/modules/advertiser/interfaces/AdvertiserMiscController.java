@@ -31,28 +31,115 @@ public class AdvertiserMiscController {
     @GetMapping("/api/advertiser/commercial-settings")
     public ResponseEntity<?> getCommercialSettings(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        var settings = jdbc.sql("""
-                SELECT settings::text FROM properia.advertisers WHERE id = :id
+        var raw = jdbc.sql("""
+                SELECT brand_name, settings::text FROM properia.advertisers WHERE id = :id
                 """).param("id", advertiserId)
-            .query((rs, n) -> parseJson(rs.getString("settings")))
-            .optional().orElse(Map.of());
-        return ResponseEntity.ok(Map.of("data", settings));
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("brandName", rs.getString("brand_name"));
+                m.put("_settings", parseJson(rs.getString("settings")));
+                return m;
+            })
+            .optional().orElse(new LinkedHashMap<>());
+
+        @SuppressWarnings("unchecked")
+        var saved = (Map<String, Object>) raw.getOrDefault("_settings", Map.of());
+
+        var emailTemplate = new LinkedHashMap<String, Object>();
+        emailTemplate.put("subject", getOrDefault(saved, "templateEmailSubject",
+            "Sobre o imóvel {{listingTitle}}"));
+        emailTemplate.put("body", getOrDefault(saved, "templateEmailBody",
+            "Olá {{firstName}},\n\nObrigado pelo seu contacto sobre {{listingTitle}}.\n\nSe continuar com interesse, posso enviar mais detalhes ou combinar visita.\n\nCumprimentos,\n{{brandName}}"));
+
+        var phoneTemplate = new LinkedHashMap<String, Object>();
+        phoneTemplate.put("script", getOrDefault(saved, "templatePhoneScript",
+            "Olá {{firstName}}, fala {{brandName}} sobre o imóvel {{listingTitle}}. Gostava de perceber se continua com interesse e se faz sentido avançarmos para visita."));
+
+        var templates = new LinkedHashMap<String, Object>();
+        templates.put("email", emailTemplate);
+        templates.put("phone", phoneTemplate);
+
+        var automation = new LinkedHashMap<String, Object>();
+        automation.put("leadFollowUpHours", getOrDefaultInt(saved, "leadFollowUpHours", 6));
+        automation.put("proposalFollowUpHours", getOrDefaultInt(saved, "proposalFollowUpHours", 48));
+
+        var data = new LinkedHashMap<String, Object>();
+        data.put("brandName", raw.get("brandName"));
+        data.put("templates", templates);
+        data.put("automation", automation);
+        return ResponseEntity.ok(Map.of("data", data));
     }
 
     @PatchMapping("/api/advertiser/commercial-settings")
     public ResponseEntity<?> updateCommercialSettings(@RequestBody Map<String, Object> body,
                                                       @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        // Merge with existing settings
         var existing = jdbc.sql("SELECT settings::text FROM properia.advertisers WHERE id = :id")
             .param("id", advertiserId)
             .query((rs, n) -> parseJson(rs.getString("settings")))
             .optional().orElse(new LinkedHashMap<>());
         var merged = new LinkedHashMap<>(existing);
-        merged.putAll(body);
+
+        // Flatten nested templates/automation into the settings blob
+        if (body.containsKey("templates")) {
+            @SuppressWarnings("unchecked")
+            var t = (Map<String, Object>) body.get("templates");
+            if (t != null) {
+                if (t.containsKey("email")) {
+                    @SuppressWarnings("unchecked")
+                    var e = (Map<String, Object>) t.get("email");
+                    if (e != null) {
+                        if (e.containsKey("subject")) merged.put("templateEmailSubject", e.get("subject"));
+                        if (e.containsKey("body")) merged.put("templateEmailBody", e.get("body"));
+                    }
+                }
+                if (t.containsKey("phone")) {
+                    @SuppressWarnings("unchecked")
+                    var p = (Map<String, Object>) t.get("phone");
+                    if (p != null && p.containsKey("script")) merged.put("templatePhoneScript", p.get("script"));
+                }
+            }
+        }
+        if (body.containsKey("automation")) {
+            @SuppressWarnings("unchecked")
+            var a = (Map<String, Object>) body.get("automation");
+            if (a != null) {
+                if (a.containsKey("leadFollowUpHours")) merged.put("leadFollowUpHours", a.get("leadFollowUpHours"));
+                if (a.containsKey("proposalFollowUpHours")) merged.put("proposalFollowUpHours", a.get("proposalFollowUpHours"));
+            }
+        }
+
         jdbc.sql("UPDATE properia.advertisers SET settings = :s::jsonb, updated_at = now() WHERE id = :id")
             .param("s", toJson(merged)).param("id", advertiserId).update();
-        return ResponseEntity.ok(Map.of("data", merged));
+
+        // Return in the same shape as GET
+        var emailTemplate = new LinkedHashMap<String, Object>();
+        emailTemplate.put("subject", merged.getOrDefault("templateEmailSubject", "Sobre o imóvel {{listingTitle}}"));
+        emailTemplate.put("body", merged.getOrDefault("templateEmailBody", ""));
+        var phoneTemplate = new LinkedHashMap<String, Object>();
+        phoneTemplate.put("script", merged.getOrDefault("templatePhoneScript", ""));
+        var templates = new LinkedHashMap<String, Object>();
+        templates.put("email", emailTemplate);
+        templates.put("phone", phoneTemplate);
+        var automation = new LinkedHashMap<String, Object>();
+        automation.put("leadFollowUpHours", getOrDefaultInt(merged, "leadFollowUpHours", 6));
+        automation.put("proposalFollowUpHours", getOrDefaultInt(merged, "proposalFollowUpHours", 48));
+        var data = new LinkedHashMap<String, Object>();
+        data.put("brandName", null);
+        data.put("templates", templates);
+        data.put("automation", automation);
+        return ResponseEntity.ok(Map.of("data", data));
+    }
+
+    private String getOrDefault(Map<String, Object> map, String key, String def) {
+        var v = map.get(key);
+        return v instanceof String s ? s : def;
+    }
+
+    private int getOrDefaultInt(Map<String, Object> map, String key, int def) {
+        var v = map.get(key);
+        if (v instanceof Number n) return n.intValue();
+        return def;
     }
 
     // ── Team activity ──────────────────────────────────────────────────────────
