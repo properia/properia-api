@@ -52,9 +52,11 @@ public class JpaListingRepository implements ListingRepository {
     public Optional<PublicListingDetailDto> findPublishedByPublicId(String publicId) {
         Optional<Listing> found;
         try {
-            found = listings.findByIdAndStatus(UUID.fromString(publicId), "published");
+            found = listings.findById(UUID.fromString(publicId))
+                .filter(l -> "published".equals(l.getStatus()));
         } catch (IllegalArgumentException e) {
-            found = listings.findByPublicIdAndStatus(publicId, "published");
+            found = listings.findByPublicId(publicId)
+                .filter(l -> "published".equals(l.getStatus()));
         }
         return found.map(this::toDetailDto);
     }
