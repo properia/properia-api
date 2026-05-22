@@ -136,17 +136,18 @@ public class UserController {
         var marketingEnabled = Boolean.TRUE.equals(prefs.get("marketingEnabled"));
         var personalizationEnabled = Boolean.TRUE.equals(prefs.get("personalizationEnabled"));
 
+        var userMap = new LinkedHashMap<String, Object>();
+        userMap.put("id", user.id().toString());
+        userMap.put("name", Optional.ofNullable(user.name()).orElse(""));
+        userMap.put("email", Optional.ofNullable(user.email()).orElse(""));
+        userMap.put("role", "user");
+        userMap.put("avatarUrl", Optional.ofNullable(user.avatarUrl()).orElse(""));
+        userMap.put("createdAt", user.createdAt().toString());
+        userMap.put("lastLoginAt", null);
+        userMap.put("emailVerifiedAt", getEmailVerifiedAt(uid));
+
         var data = new LinkedHashMap<String, Object>();
-        data.put("user", Map.of(
-            "id", user.id().toString(),
-            "name", Optional.ofNullable(user.name()).orElse(""),
-            "email", Optional.ofNullable(user.email()).orElse(""),
-            "role", "user",
-            "avatarUrl", Optional.ofNullable(user.avatarUrl()).orElse(""),
-            "createdAt", user.createdAt().toString(),
-            "lastLoginAt", (Object) null,
-            "emailVerifiedAt", getEmailVerifiedAt(uid)
-        ));
+        data.put("user", userMap);
         data.put("stats", Map.of(
             "visitsTotal", visitsTotal,
             "visitsUpcoming", visitsUpcoming,
