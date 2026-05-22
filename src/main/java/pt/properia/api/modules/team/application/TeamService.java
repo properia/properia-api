@@ -197,11 +197,16 @@ public class TeamService {
             .param("email", finalEmail).query(UUID.class).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Utilizador não encontrado: " + finalEmail, 404));
 
-        var alreadyMember = memberRepo.existsById(new AdvertiserUserId(advertiserId, userId));
+        var alreadyMember = jdbc.sql("""
+                SELECT 1 FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", userId)
+            .query(Integer.class).optional().isPresent();
         if (alreadyMember) throw new DomainException("CONFLICT", "Utilizador já é membro.", 409);
 
         var member = new AdvertiserUser();
-        member.setId(new AdvertiserUserId(advertiserId, userId));
+        member.setAdvertiserId(advertiserId);
+        member.setUserId(userId);
         member.setMembershipRole(role);
         member.setCreatedAt(Instant.now());
         memberRepo.save(member);
