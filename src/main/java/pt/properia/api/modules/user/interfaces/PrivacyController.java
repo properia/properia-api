@@ -162,7 +162,9 @@ public class PrivacyController {
                 return (Map<String, Object>) m;
             }).optional().orElse(null);
 
-        return ResponseEntity.ok(Map.of("data", Map.of("dossier", dossier != null ? dossier : (Object) null)));
+        var dossierData = new java.util.LinkedHashMap<String, Object>();
+        dossierData.put("dossier", dossier);
+        return ResponseEntity.ok(Map.of("data", dossierData));
     }
 
     @PostMapping("/api/decision-dossiers")

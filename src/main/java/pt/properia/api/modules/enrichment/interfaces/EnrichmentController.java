@@ -28,7 +28,9 @@ public class EnrichmentController {
     @GetMapping("/zone")
     public ResponseEntity<?> getZone(@PathVariable UUID id) {
         var data = loadEnrichment(id, "zone");
-        return ResponseEntity.ok(Map.of("data", data != null ? data : (Object) null));
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("data", data);
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/zone")
@@ -50,7 +52,9 @@ public class EnrichmentController {
     @GetMapping("/pois")
     public ResponseEntity<?> getPois(@PathVariable UUID id) {
         var data = loadEnrichment(id, "pois");
-        return ResponseEntity.ok(Map.of("data", data != null ? data : (Object) null));
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("data", data);
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/pois")
@@ -72,7 +76,9 @@ public class EnrichmentController {
     @GetMapping("/vision")
     public ResponseEntity<?> getVision(@PathVariable UUID id) {
         var data = loadEnrichment(id, "vision");
-        return ResponseEntity.ok(Map.of("data", data != null ? data : (Object) null));
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("data", data);
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/vision")
@@ -96,7 +102,9 @@ public class EnrichmentController {
                                          @AuthenticationPrincipal JwtClaims claims) {
         var userId = claims != null ? claims.userId() : null;
         var data = loadMatchingForUser(id, userId);
-        return ResponseEntity.ok(Map.of("data", data != null ? data : (Object) null));
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("data", data);
+        return ResponseEntity.ok(resp);
     }
 
     @PostMapping("/matching")

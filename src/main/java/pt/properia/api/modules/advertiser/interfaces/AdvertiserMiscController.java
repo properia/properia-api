@@ -263,7 +263,9 @@ public class AdvertiserMiscController {
                                         @AuthenticationPrincipal JwtClaims claims) {
         requireAdvertiserId(claims);
         var vocation = loadVocacao(id);
-        return ResponseEntity.ok(Map.of("data", vocation != null ? vocation : (Object) null));
+        var vocData = new java.util.LinkedHashMap<String, Object>();
+        vocData.put("data", vocation);
+        return ResponseEntity.ok(vocData);
     }
 
     @PostMapping("/api/advertiser/listings/{id}/vocacao")
@@ -273,12 +275,12 @@ public class AdvertiserMiscController {
         // Return existing or create placeholder — AI analysis handled async
         var vocation = loadVocacao(id);
         if (vocation == null) {
-            vocation = Map.of(
-                "listingId", id.toString(),
-                "status", "pending",
-                "primaryUse", (Object) null,
-                "message", "Análise ainda não disponível para este imóvel."
-            );
+            var placeholder = new java.util.LinkedHashMap<String, Object>();
+            placeholder.put("listingId", id.toString());
+            placeholder.put("status", "pending");
+            placeholder.put("primaryUse", null);
+            placeholder.put("message", "Análise ainda não disponível para este imóvel.");
+            vocation = placeholder;
         }
         return ResponseEntity.ok(Map.of("data", vocation));
     }
@@ -299,7 +301,9 @@ public class AdvertiserMiscController {
                 .param("id", id).update();
         }
         var vocation = loadVocacao(id);
-        return ResponseEntity.ok(Map.of("data", vocation != null ? vocation : (Object) null));
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("data", vocation);
+        return ResponseEntity.ok(result);
     }
 
     // ── Media delete ───────────────────────────────────────────────────────────
@@ -343,7 +347,9 @@ public class AdvertiserMiscController {
         var advertiserId = requireAdvertiserId(claims);
         jdbc.sql("UPDATE properia.advertisers SET logo_url = NULL, updated_at = now() WHERE id = :id")
             .param("id", advertiserId).update();
-        return ResponseEntity.ok(Map.of("data", Map.of("logoUrl", (Object) null)));
+        var logoData = new java.util.LinkedHashMap<String, Object>();
+        logoData.put("logoUrl", null);
+        return ResponseEntity.ok(Map.of("data", logoData));
     }
 
     // ── Automation queue ───────────────────────────────────────────────────────

@@ -27,7 +27,11 @@ public class AdvertiserOnboardingController {
     public ResponseEntity<?> getOnboarding(@AuthenticationPrincipal JwtClaims claims) {
         requireAuth(claims);
         var data = loadOnboarding(claims.userId());
-        if (data == null) return ResponseEntity.ok(Map.of("data", (Object) null));
+        if (data == null) {
+            var nullData = new java.util.LinkedHashMap<String, Object>();
+            nullData.put("data", null);
+            return ResponseEntity.ok(nullData);
+        }
         return ResponseEntity.ok(Map.of("data", data));
     }
 
