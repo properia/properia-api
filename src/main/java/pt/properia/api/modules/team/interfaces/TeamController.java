@@ -24,6 +24,15 @@ public class TeamController {
 
     // ── Members ───────────────────────────────────────────────────────────────
 
+    @PostMapping("/members/direct")
+    public ResponseEntity<?> addMemberDirect(
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        teamService.addMemberByEmail(advertiserId, claims.userId(), body.get("email"), body.get("membershipRole"));
+        return ResponseEntity.status(201).body(Map.of("data", Map.of("added", true)));
+    }
+
     @GetMapping("/members")
     public ResponseEntity<?> listMembers(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);

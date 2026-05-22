@@ -178,6 +178,35 @@ public class TeamService {
             "pending", invitorName, expiresAt, null, invite.getCreatedAt());
     }
 
+    public void addMemberByEmail(UUID advertiserId, UUID requestorUserId, String email, String role) {
+        if (!Set.of("admin", "editor", "sales", "viewer").contains(role))
+            throw new DomainException("BAD_REQUEST", "Role inválida.", 400);
+
+        // Only owner/admin can add directly
+        var requestorRole = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(String.class).optional()
+            .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão.", 403));
+        if (!Set.of("owner", "admin").contains(requestorRole))
+            throw new DomainException("FORBIDDEN", "Apenas owner ou admin podem adicionar membros directamente.", 403);
+
+        var finalEmail = email.trim().toLowerCase();
+        var userId = jdbc.sql("SELECT id FROM properia.app_users WHERE email = :email")
+            .param("email", finalEmail).query(UUID.class).optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Utilizador não encontrado: " + finalEmail, 404));
+
+        var alreadyMember = memberRepo.existsById(new AdvertiserUserId(advertiserId, userId));
+        if (alreadyMember) throw new DomainException("CONFLICT", "Utilizador já é membro.", 409);
+
+        var member = new AdvertiserUser();
+        member.setId(new AdvertiserUserId(advertiserId, userId));
+        member.setMembershipRole(role);
+        member.setCreatedAt(Instant.now());
+        memberRepo.save(member);
+    }
+
     public void cancelInvite(UUID advertiserId, UUID inviteId) {
         var invite = inviteRepo.findByAdvertiserIdAndId(advertiserId, inviteId)
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Convite não encontrado.", 404));
