@@ -254,8 +254,7 @@ public class LeadController {
         if (body.containsKey("contactName")) { sets.add("contact_name = :contactName"); params.put("contactName", body.get("contactName")); }
         if (body.containsKey("contactEmail")) { sets.add("contact_email = :contactEmail"); params.put("contactEmail", body.get("contactEmail")); }
         if (body.containsKey("contactPhone")) { sets.add("contact_phone = :contactPhone"); params.put("contactPhone", body.get("contactPhone")); }
-        if (body.containsKey("internalNotes")) { sets.add("internal_notes = :internalNotes"); params.put("internalNotes", body.get("internalNotes")); }
-        if (body.containsKey("stage")) { sets.add("stage = :stage"); params.put("stage", body.get("stage")); }
+        if (body.containsKey("stage")) { sets.add("stage = :stage::lead_stage"); params.put("stage", body.get("stage")); }
         if (body.containsKey("assignedToUserId")) {
             var v = body.get("assignedToUserId");
             sets.add("assigned_to = :assignedTo");

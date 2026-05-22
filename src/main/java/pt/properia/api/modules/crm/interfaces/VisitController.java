@@ -130,9 +130,118 @@ public class VisitController {
     // ── Advertiser: manage visits ───────────────────────────────────────────
 
     @GetMapping("/api/advertiser/visitas")
-    public ResponseEntity<?> listForAdvertiser(@AuthenticationPrincipal JwtClaims claims) {
+    public ResponseEntity<?> listForAdvertiser(
+            @AuthenticationPrincipal JwtClaims claims,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
         var advertiserId = requireAdvertiserId(claims);
-        return ResponseEntity.ok(Map.of("data", getVisits.forAdvertiser(advertiserId)));
+
+        var whereParts = new java.util.ArrayList<String>();
+        var params = new java.util.LinkedHashMap<String, Object>();
+        whereParts.add("v.advertiser_id = :adv");
+        params.put("adv", advertiserId);
+
+        if (status != null && !status.isBlank() && !"todas".equals(status)) {
+            whereParts.add("v.status::text = :status");
+            params.put("status", status);
+        }
+        if (q != null && !q.isBlank()) {
+            whereParts.add("(v.notes ILIKE :q OR l.contact_name ILIKE :q OR l.contact_email ILIKE :q)");
+            params.put("q", "%" + q + "%");
+        }
+        if (dateFrom != null && !dateFrom.isBlank()) {
+            whereParts.add("v.starts_at >= :dateFrom::timestamptz");
+            params.put("dateFrom", dateFrom);
+        }
+        if (dateTo != null && !dateTo.isBlank()) {
+            whereParts.add("v.starts_at <= :dateTo::timestamptz");
+            params.put("dateTo", dateTo);
+        }
+
+        var whereClause = "WHERE " + String.join(" AND ", whereParts);
+        int safePageSize = Math.min(100, Math.max(1, pageSize));
+        int safePage = Math.max(1, page);
+        int offset = (safePage - 1) * safePageSize;
+
+        var joinClause = """
+                FROM properia.visits v
+                LEFT JOIN properia.leads l ON l.id = v.lead_id
+                LEFT JOIN properia.listings li ON li.id = v.listing_id
+                """;
+
+        var countSql = "SELECT COUNT(*) " + joinClause + whereClause;
+        var countQuery = jdbc.sql(countSql);
+        for (var e : params.entrySet()) countQuery = countQuery.param(e.getKey(), e.getValue());
+        long total = countQuery.query(Long.class).single();
+
+        var listSql = """
+                SELECT v.id, v.lead_id, v.advertiser_id, v.listing_id, v.mode, v.status,
+                       v.starts_at, v.ends_at, v.meeting_url, v.notes, v.created_at, v.updated_at,
+                       l.id AS l_id, l.contact_name, l.contact_email, l.contact_phone,
+                       l.source AS l_source, l.stage AS l_stage,
+                       li.id AS li_id, li.public_id AS li_public_id, li.title AS li_title,
+                       li.business_type AS li_business_type, li.city AS li_city, li.district AS li_district
+                """ + joinClause + whereClause + " ORDER BY v.starts_at DESC LIMIT :lim OFFSET :off";
+        var listQuery = jdbc.sql(listSql);
+        for (var e : params.entrySet()) listQuery = listQuery.param(e.getKey(), e.getValue());
+        listQuery = listQuery.param("lim", safePageSize).param("off", offset);
+
+        var items = listQuery.query((rs, n) -> {
+            var m = new java.util.LinkedHashMap<String, Object>();
+            m.put("id", rs.getString("id"));
+            m.put("leadId", rs.getString("lead_id"));
+            m.put("advertiserId", rs.getString("advertiser_id"));
+            m.put("listingId", rs.getString("listing_id"));
+            m.put("isLocked", false);
+            m.put("mode", rs.getString("mode"));
+            m.put("status", rs.getString("status"));
+            m.put("startsAt", rs.getTimestamp("starts_at") != null ? rs.getTimestamp("starts_at").toInstant().toString() : null);
+            m.put("endsAt", rs.getTimestamp("ends_at") != null ? rs.getTimestamp("ends_at").toInstant().toString() : null);
+            m.put("meetingUrl", rs.getString("meeting_url"));
+            m.put("meetingProvider", null);
+            m.put("externalCalendarEventId", null);
+            m.put("meetingCreatedAt", null);
+            m.put("meetingSyncStatus", null);
+            m.put("notes", rs.getString("notes"));
+            m.put("statusReason", null);
+            m.put("outcome", null);
+            m.put("outcomeNotes", null);
+            m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
+            m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
+
+            var lead = new java.util.LinkedHashMap<String, Object>();
+            lead.put("id", rs.getString("l_id"));
+            lead.put("contactName", rs.getString("contact_name"));
+            lead.put("contactEmail", rs.getString("contact_email"));
+            lead.put("contactPhone", rs.getString("contact_phone"));
+            lead.put("source", rs.getString("l_source"));
+            lead.put("stage", rs.getString("l_stage"));
+            m.put("lead", lead);
+
+            var listing = new java.util.LinkedHashMap<String, Object>();
+            listing.put("id", Optional.ofNullable(rs.getString("li_id")).orElse(rs.getString("listing_id")));
+            listing.put("publicId", Optional.ofNullable(rs.getString("li_public_id")).orElse(""));
+            listing.put("title", Optional.ofNullable(rs.getString("li_title")).orElse("Imóvel"));
+            listing.put("businessType", Optional.ofNullable(rs.getString("li_business_type")).orElse("sale"));
+            listing.put("city", rs.getString("li_city"));
+            listing.put("district", rs.getString("li_district"));
+            m.put("listing", listing);
+
+            return (Map<String, Object>) m;
+        }).list();
+
+        int totalPages = (int) Math.ceil((double) total / safePageSize);
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("items", items);
+        result.put("total", total);
+        result.put("page", safePage);
+        result.put("pageSize", safePageSize);
+        result.put("totalPages", Math.max(1, totalPages));
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @PatchMapping("/api/advertiser/visitas/{id}/status")

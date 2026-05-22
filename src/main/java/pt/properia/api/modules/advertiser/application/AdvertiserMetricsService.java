@@ -147,7 +147,7 @@ public class AdvertiserMetricsService {
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = li.id
                 WHERE li.advertiser_id = :adv
                   AND li.status != 'archived'
-                GROUP BY li.id, li.title, li.status, p.amount, p.currency_code
+                GROUP BY li.id, li.title, li.status, p.list_price, p.price_currency
                 ORDER BY leads_total DESC, li.created_at DESC
                 """)
             .param("adv", advertiserId)
