@@ -137,18 +137,18 @@ public class AdvertiserOnboardingController {
 
     private Object loadLatestModeration(String advertiserId) {
         return jdbc.sql("""
-                SELECT decision, reason_category, public_reason, decided_at
+                SELECT decision, reason_category, public_reason, created_at
                 FROM properia.moderation_decisions
                 WHERE target_id = :id AND target_type = 'advertiser'
-                ORDER BY decided_at DESC LIMIT 1
+                ORDER BY created_at DESC LIMIT 1
                 """).param("id", UUID.fromString(advertiserId))
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("decision", rs.getString("decision"));
                 m.put("reasonCategory", rs.getString("reason_category"));
                 m.put("publicReason", rs.getString("public_reason"));
-                m.put("decidedAt", rs.getTimestamp("decided_at") != null
-                    ? rs.getTimestamp("decided_at").toInstant().toString() : null);
+                m.put("decidedAt", rs.getTimestamp("created_at") != null
+                    ? rs.getTimestamp("created_at").toInstant().toString() : null);
                 return (Object) m;
             }).optional().orElse(null);
     }
