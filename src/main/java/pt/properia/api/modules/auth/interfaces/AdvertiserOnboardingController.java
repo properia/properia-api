@@ -99,8 +99,8 @@ public class AdvertiserOnboardingController {
             .param("type", advertiserType).update();
 
         jdbc.sql("""
-                INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at, updated_at)
-                VALUES (:adv, :uid, 'owner', now(), now())
+                INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at)
+                VALUES (:adv, :uid, 'owner', now())
                 """)
             .param("adv", id).param("uid", claims.userId()).update();
 

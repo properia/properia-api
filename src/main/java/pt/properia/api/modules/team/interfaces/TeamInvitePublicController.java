@@ -105,8 +105,8 @@ public class TeamInvitePublicController {
 
         // Create membership and mark invite accepted
         jdbc.sql("""
-                INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at, updated_at)
-                VALUES (:adv, :uid, :role, now(), now())
+                INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at)
+                VALUES (:adv, :uid, :role, now())
                 ON CONFLICT (advertiser_id, user_id) DO NOTHING
                 """)
             .param("adv", advertiserId)

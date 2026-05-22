@@ -124,11 +124,11 @@ public class AdvertiserMiscController {
         }
 
         jdbc.sql("""
-                UPDATE properia.advertiser_users SET membership_role = 'owner', updated_at = now()
+                UPDATE properia.advertiser_users SET membership_role = 'owner'
                 WHERE advertiser_id = :adv AND user_id = :uid
                 """).param("adv", advertiserId).param("uid", targetUid).update();
         jdbc.sql("""
-                UPDATE properia.advertiser_users SET membership_role = 'admin', updated_at = now()
+                UPDATE properia.advertiser_users SET membership_role = 'admin'
                 WHERE advertiser_id = :adv AND user_id = :uid
                 """).param("adv", advertiserId).param("uid", claims.userId()).update();
 
