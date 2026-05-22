@@ -140,38 +140,72 @@ public class AdvertiserMetricsService {
 
     // ── Listing metrics ───────────────────────────────────────────────────────
 
-    public record ListingMetricItem(String listingId, String title, String status,
-                                    int leadsTotal, int leadsNew, int visitsConfirmed,
-                                    long priceAmount, String currencyCode) {}
+    public record ListingMetricItem(
+        String listingId, String listingTitle, String publicId,
+        String city, String district, String status,
+        int detailViewsTotal, int leadsTotal,
+        int visitsTotal, int visitsConfirmed,
+        int wonTotal, double conversionRate,
+        long priceAmount, String currencyCode,
+        Map<String, Integer> funnel
+    ) {}
 
     public List<ListingMetricItem> getListingMetrics(UUID advertiserId) {
         return jdbc.sql("""
-                SELECT li.id, li.title, li.status,
+                SELECT li.id, li.title, li.public_id, li.city, li.district, li.status,
+                       COUNT(DISTINCT dv.id) AS detail_views_total,
                        COUNT(DISTINCT l.id) AS leads_total,
-                       COUNT(DISTINCT CASE WHEN l.stage = 'new' THEN l.id END) AS leads_new,
+                       COUNT(DISTINCT v.id) AS visits_total,
                        COUNT(DISTINCT CASE WHEN v.status = 'confirmed' THEN v.id END) AS visits_confirmed,
+                       COUNT(DISTINCT CASE WHEN l.stage::text = 'won' THEN l.id END) AS won_total,
+                       COUNT(DISTINCT CASE WHEN l.stage::text = 'new' THEN l.id END) AS leads_new,
+                       COUNT(DISTINCT CASE WHEN l.stage::text IN ('contacted','visit_scheduled') THEN l.id END) AS leads_contacted,
+                       COUNT(DISTINCT CASE WHEN l.stage::text = 'qualified' THEN l.id END) AS leads_qualified,
+                       COUNT(DISTINCT CASE WHEN l.stage::text = 'proposal' THEN l.id END) AS leads_proposal,
+                       COUNT(DISTINCT CASE WHEN l.stage::text = 'lost' THEN l.id END) AS leads_lost,
                        COALESCE(p.list_price, 0) AS price_amount,
                        COALESCE(p.price_currency, 'EUR') AS currency_code
                 FROM properia.listings li
                 LEFT JOIN properia.leads l ON l.listing_id = li.id
                 LEFT JOIN properia.visits v ON v.lead_id = l.id
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = li.id
+                LEFT JOIN properia.listing_detail_views dv ON dv.listing_id = li.id
                 WHERE li.advertiser_id = :adv
-                  AND li.status != 'archived'
-                GROUP BY li.id, li.title, li.status, p.list_price, p.price_currency
+                  AND li.status::text != 'archived'
+                GROUP BY li.id, li.title, li.public_id, li.city, li.district, li.status, p.list_price, p.price_currency
                 ORDER BY leads_total DESC, li.created_at DESC
                 """)
             .param("adv", advertiserId)
-            .query((rs, n) -> new ListingMetricItem(
-                rs.getString("id"),
-                rs.getString("title"),
-                rs.getString("status"),
-                rs.getInt("leads_total"),
-                rs.getInt("leads_new"),
-                rs.getInt("visits_confirmed"),
-                rs.getLong("price_amount"),
-                rs.getString("currency_code")
-            ))
+            .query((rs, n) -> {
+                int leadsTotal = rs.getInt("leads_total");
+                int visitsTotal = rs.getInt("visits_total");
+                double conversionRate = leadsTotal > 0
+                    ? Math.round((double) visitsTotal / leadsTotal * 1000) / 1000.0 : 0.0;
+                return new ListingMetricItem(
+                    rs.getString("id"),
+                    rs.getString("title"),
+                    rs.getString("public_id"),
+                    rs.getString("city"),
+                    rs.getString("district"),
+                    rs.getString("status"),
+                    rs.getInt("detail_views_total"),
+                    leadsTotal,
+                    visitsTotal,
+                    rs.getInt("visits_confirmed"),
+                    rs.getInt("won_total"),
+                    conversionRate,
+                    rs.getLong("price_amount"),
+                    rs.getString("currency_code"),
+                    Map.of(
+                        "new", rs.getInt("leads_new"),
+                        "contacted", rs.getInt("leads_contacted"),
+                        "qualified", rs.getInt("leads_qualified"),
+                        "proposal", rs.getInt("leads_proposal"),
+                        "won", rs.getInt("won_total"),
+                        "lost", rs.getInt("leads_lost")
+                    )
+                );
+            })
             .list();
     }
 
