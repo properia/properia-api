@@ -141,8 +141,8 @@ public class AdminService {
         if (actorUserId != null) { where.append(" AND actor_user_id = :actor::uuid"); params.put("actor", actorUserId); }
         if (advertiserId != null) { where.append(" AND advertiser_id = :adv::uuid"); params.put("adv", advertiserId); }
         if (action != null) { where.append(" AND action LIKE :action"); params.put("action", action + "%"); }
-        if (from != null) { where.append(" AND created_at >= :from"); params.put("from", Instant.parse(from)); }
-        if (to != null) { where.append(" AND created_at <= :to"); params.put("to", Instant.parse(to)); }
+        if (from != null) { where.append(" AND created_at >= :from"); params.put("from", java.sql.Timestamp.from(Instant.parse(from))); }
+        if (to != null) { where.append(" AND created_at <= :to"); params.put("to", java.sql.Timestamp.from(Instant.parse(to))); }
 
         var sql = "SELECT id, event_category, action, severity, actor_user_id, actor_email, " +
                   "advertiser_id, entity_type, entity_id, ip_address, metadata::text, created_at " +

@@ -93,7 +93,7 @@ public class UserService {
                 VALUES (:id, :uid, :name, :params::jsonb, true, :now, :now)
                 """)
             .param("id", id).param("uid", userId).param("name", name)
-            .param("params", paramsJson).param("now", now).update();
+            .param("params", paramsJson).param("now", java.sql.Timestamp.from(now)).update();
 
         return new AlertaDto(id, name, params, true, now, now);
     }

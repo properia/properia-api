@@ -106,7 +106,7 @@ public class IntegrationsService {
             .param("channel", channel)
             .param("token", token)
             .param("settings", settingsJson)
-            .param("now", now)
+            .param("now", java.sql.Timestamp.from(now))
             .update();
 
         return listIntegrations(advertiserId).stream()

@@ -199,8 +199,8 @@ public class VisitController {
                     SET code_hash = :hash, expires_at = :exp, consumed_at = NULL,
                         last_sent_at = :now, failed_attempts = 0, updated_at = :now
                     WHERE id = :id
-                    """).param("hash", codeHash).param("exp", expiresAt)
-                .param("now", now).param("id", existing.get().get("id")).update();
+                    """).param("hash", codeHash).param("exp", java.sql.Timestamp.from(expiresAt))
+                .param("now", java.sql.Timestamp.from(now)).param("id", existing.get().get("id")).update();
         } else {
             jdbc.sql("""
                     INSERT INTO properia.visit_email_verifications
@@ -208,7 +208,7 @@ public class VisitController {
                     VALUES (:id, :uid, :email, :hash, :exp, :now, :now, :now)
                     """).param("id", UUID.randomUUID()).param("uid", claims.userId())
                 .param("email", user.get("email")).param("hash", codeHash)
-                .param("exp", expiresAt).param("now", now).update();
+                .param("exp", java.sql.Timestamp.from(expiresAt)).param("now", java.sql.Timestamp.from(now)).update();
         }
         // Note: in production, email is sent by async service reading from the table
         return ResponseEntity.ok(Map.of("data", Map.of(

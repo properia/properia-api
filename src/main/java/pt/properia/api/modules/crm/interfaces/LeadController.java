@@ -111,7 +111,7 @@ public class LeadController {
         if (body.containsKey("nextFollowUpAt")) {
             var v = body.get("nextFollowUpAt");
             sets.add("next_follow_up_at = :followUpAt");
-            params.put("followUpAt", v != null ? Instant.parse(v.toString()) : null);
+            params.put("followUpAt", v != null ? java.sql.Timestamp.from(Instant.parse(v.toString())) : null);
         }
 
         if (sets.isEmpty()) return ResponseEntity.ok(Map.of("data", Map.of("updated", false)));

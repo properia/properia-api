@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.shared.domain.DomainException;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -40,8 +41,8 @@ public class SessionService {
             .param("ip", ipAddress)
             .param("ua", userAgent != null ? userAgent.substring(0, Math.min(500, userAgent.length())) : null)
             .param("adv", advertiserId)
-            .param("exp", expiresAt)
-            .param("now", now)
+            .param("exp", Timestamp.from(expiresAt))
+            .param("now", Timestamp.from(now))
             .update();
         return id;
     }

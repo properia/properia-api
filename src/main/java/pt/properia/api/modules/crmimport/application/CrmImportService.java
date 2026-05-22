@@ -108,7 +108,7 @@ public class CrmImportService {
             .param("sc", sourceChannel)
             .param("im", ingestionMethod)
             .param("fn", fileName)
-            .param("now", now)
+            .param("now", java.sql.Timestamp.from(now))
             .update();
         return getBatch(advertiserId, id);
     }

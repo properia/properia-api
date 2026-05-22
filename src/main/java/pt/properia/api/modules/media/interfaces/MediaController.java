@@ -53,7 +53,7 @@ public class MediaController {
             .param("key", objectKey)
             .param("ct", contentType)
             .param("fn", fileName)
-            .param("exp", expiresAt)
+            .param("exp", java.sql.Timestamp.from(expiresAt))
             .update();
 
         var uploadUrl = buildUploadUrl(objectKey);
