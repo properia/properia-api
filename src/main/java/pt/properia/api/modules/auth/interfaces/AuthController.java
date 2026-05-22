@@ -319,16 +319,7 @@ public class AuthController {
     }
 
     private void setSessionCookie(HttpServletResponse response, String token) {
-        var cookie = new Cookie(SESSION_COOKIE, token);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(jwtProps.isCookieSecure());
-        cookie.setPath("/");
-        cookie.setMaxAge((int) jwtProps.getTtlSeconds());
-        if (jwtProps.getCookieDomain() != null && !jwtProps.getCookieDomain().isBlank()) {
-            cookie.setDomain(jwtProps.getCookieDomain());
-        }
-        // SameSite=Lax must be set via header (Servlet API doesn't support it directly)
-        response.addCookie(cookie);
+        // Use raw header to support dot-prefixed domains and SameSite (Servlet API doesn't support either)
         response.addHeader("Set-Cookie",
             SESSION_COOKIE + "=" + token
                 + "; Path=/"
