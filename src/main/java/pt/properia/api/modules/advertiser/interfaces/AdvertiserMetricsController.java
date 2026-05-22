@@ -24,16 +24,8 @@ public class AdvertiserMetricsController {
             @RequestParam(required = false) String source,
             @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        try {
-            var data = metricsService.getMetrics(advertiserId, source);
-            return ResponseEntity.ok(Map.of("data", data));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of(
-                "debug_error", e.getMessage() != null ? e.getMessage() : e.getClass().getName(),
-                "debug_cause", e.getCause() != null ? e.getCause().getMessage() : "none",
-                "debug_type", e.getClass().getName()
-            ));
-        }
+        var data = metricsService.getMetrics(advertiserId, source);
+        return ResponseEntity.ok(Map.of("data", data));
     }
 
     @GetMapping("/api/advertiser/metrics/by-agent")

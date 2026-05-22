@@ -44,7 +44,7 @@ public class AdvertiserMetricsService {
                 FROM properia.leads l
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = l.listing_id
                 WHERE l.advertiser_id = :adv
-                  AND (:source IS NULL OR l.source::text = :source)
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
                 """)
             .param("adv", advertiserId)
             .param("source", (source != null && !source.equals("todas")) ? source : null)
@@ -62,7 +62,7 @@ public class AdvertiserMetricsService {
                 FROM properia.visits v
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.advertiser_id = :adv
-                  AND (:source IS NULL OR l.source::text = :source)
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
                 GROUP BY v.status
                 """)
             .param("adv", advertiserId)
