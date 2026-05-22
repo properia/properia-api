@@ -10,5 +10,7 @@ public interface ListingJpaRepository extends JpaRepository<Listing, UUID> {
 
     Optional<Listing> findByPublicIdAndStatus(String publicId, String status);
 
+    Optional<Listing> findByIdAndStatus(UUID id, String status);
+
     Optional<Listing> findByIdAndAdvertiserId(UUID id, UUID advertiserId);
 }

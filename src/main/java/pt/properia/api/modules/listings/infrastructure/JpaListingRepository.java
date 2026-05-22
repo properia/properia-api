@@ -50,8 +50,13 @@ public class JpaListingRepository implements ListingRepository {
 
     @Override
     public Optional<PublicListingDetailDto> findPublishedByPublicId(String publicId) {
-        return listings.findByPublicIdAndStatus(publicId, "published")
-            .map(this::toDetailDto);
+        Optional<Listing> found;
+        try {
+            found = listings.findByIdAndStatus(UUID.fromString(publicId), "published");
+        } catch (IllegalArgumentException e) {
+            found = listings.findByPublicIdAndStatus(publicId, "published");
+        }
+        return found.map(this::toDetailDto);
     }
 
     @Override
