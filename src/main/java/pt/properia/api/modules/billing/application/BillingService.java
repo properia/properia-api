@@ -111,13 +111,17 @@ public class BillingService {
     // ── Trial ─────────────────────────────────────────────────────────────────
 
     public void activateTrial(UUID advertiserId) {
-        var snapshot = billingRepo.getSnapshot(advertiserId);
-        if (snapshot.planCode() != null && !"free".equals(snapshot.planCode())) {
-            throw new DomainException("CONFLICT", "Este anunciante já tem um plano activo.");
+        var meta = billingRepo.getSnapshot(advertiserId).billingMetadata();
+        if (meta.containsKey("trialActivatedAt")) {
+            throw new DomainException("CONFLICT", "Trial já foi ativado para este anunciante.");
         }
-        billingRepo.updatePlanCode(advertiserId, "starter");
+        var now = java.time.Instant.now();
+        var endsAt = now.plus(90, java.time.temporal.ChronoUnit.DAYS);
+        billingRepo.updatePlanCode(advertiserId, "business");
         billingRepo.patchBillingMetadata(advertiserId, Map.of(
-            "trialActivatedAt", java.time.Instant.now().toString(),
+            "trialActivatedAt", now.toString(),
+            "trialEndsAt", endsAt.toString(),
+            "trialPlanCode", "business",
             "paymentStatus", "active"
         ));
     }

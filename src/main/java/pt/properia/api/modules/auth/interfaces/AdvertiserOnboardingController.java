@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.billing.application.BillingService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -17,10 +18,13 @@ public class AdvertiserOnboardingController {
 
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
+    private final BillingService billingService;
 
-    public AdvertiserOnboardingController(JdbcClient jdbc, ObjectMapper objectMapper) {
+    public AdvertiserOnboardingController(JdbcClient jdbc, ObjectMapper objectMapper,
+                                          BillingService billingService) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.billingService = billingService;
     }
 
     @GetMapping("/me")
@@ -187,6 +191,11 @@ public class AdvertiserOnboardingController {
                 """)
             .param("adv", id).param("uid", claims.userId())
             .param("type", advertiserType).update();
+
+        // Auto-activate 90-day business trial for agencies
+        if ("agency".equals(advertiserType)) {
+            try { billingService.activateTrial(id); } catch (Exception ignored) {}
+        }
 
         var result = loadOnboarding(claims.userId());
         return ResponseEntity.status(201).body(Map.of("data", result));
