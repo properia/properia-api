@@ -67,6 +67,16 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("data", Map.of("activated", true)));
     }
 
+    @PostMapping("/advertisers/{id}/members")
+    public ResponseEntity<?> addMember(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        requireAdmin(claims);
+        adminService.addMemberDirect(id, body.get("email"), body.get("membershipRole"));
+        return ResponseEntity.ok(Map.of("data", Map.of("added", true)));
+    }
+
     // ── Audit ─────────────────────────────────────────────────────────────────
 
     @GetMapping("/audit/events")

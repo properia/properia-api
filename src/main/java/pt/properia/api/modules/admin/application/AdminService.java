@@ -122,6 +122,31 @@ public class AdminService {
             .update();
     }
 
+    public void addMemberDirect(UUID advertiserId, String email, String role) {
+        if (email == null || role == null) throw new DomainException("BAD_REQUEST", "email e membershipRole obrigatórios.", 400);
+        if (!Set.of("admin", "editor", "sales", "viewer").contains(role))
+            throw new DomainException("BAD_REQUEST", "Role inválida.", 400);
+
+        var userId = jdbc.sql("SELECT id FROM properia.app_users WHERE email = :email")
+            .param("email", email.trim().toLowerCase())
+            .query(UUID.class).optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Utilizador não encontrado: " + email, 404));
+
+        var alreadyMember = jdbc.sql("""
+                SELECT 1 FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", userId)
+            .query(Integer.class).optional().isPresent();
+        if (alreadyMember) throw new DomainException("CONFLICT", "Utilizador já é membro.", 409);
+
+        jdbc.sql("""
+                INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at)
+                VALUES (:adv, :uid, :role, now())
+                """)
+            .param("adv", advertiserId).param("uid", userId).param("role", role)
+            .update();
+    }
+
     // ── Audit events ──────────────────────────────────────────────────────────
 
     public record AuditEventDto(UUID id, String eventCategory, String action, String severity,
