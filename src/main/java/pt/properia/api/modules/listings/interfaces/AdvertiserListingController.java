@@ -22,18 +22,21 @@ public class AdvertiserListingController {
     private final UpdateListingUseCase updateListingUseCase;
     private final PublishListingUseCase publishListingUseCase;
     private final ArchiveListingUseCase archiveListingUseCase;
+    private final PatchListingService patchListingService;
 
     public AdvertiserListingController(
             GetAdvertiserListingsUseCase getListingsUseCase,
             CreateListingUseCase createListingUseCase,
             UpdateListingUseCase updateListingUseCase,
             PublishListingUseCase publishListingUseCase,
-            ArchiveListingUseCase archiveListingUseCase) {
+            ArchiveListingUseCase archiveListingUseCase,
+            PatchListingService patchListingService) {
         this.getListingsUseCase = getListingsUseCase;
         this.createListingUseCase = createListingUseCase;
         this.updateListingUseCase = updateListingUseCase;
         this.publishListingUseCase = publishListingUseCase;
         this.archiveListingUseCase = archiveListingUseCase;
+        this.patchListingService = patchListingService;
     }
 
     @GetMapping
@@ -60,7 +63,11 @@ public class AdvertiserListingController {
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
             "id", listing.getId(),
             "publicId", listing.getPublicId(),
-            "status", listing.getStatus()
+            "status", listing.getStatus(),
+            "advertiserId", listing.getAdvertiserId(),
+            "title", listing.getTitle(),
+            "businessType", listing.getBusinessType(),
+            "propertyType", listing.getPropertyType()
         )));
     }
 
@@ -88,6 +95,16 @@ public class AdvertiserListingController {
             "publicId", listing.getPublicId(),
             "status", listing.getStatus()
         )));
+    }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<?> patch(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal JwtClaims claims,
+            @RequestBody Map<String, Object> body) {
+        var advertiserId = resolveAdvertiserId(claims);
+        var result = patchListingService.patch(id, advertiserId, body);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @PostMapping("/{id}/publish")

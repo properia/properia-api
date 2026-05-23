@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.enrichment.vision.application.VisionService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -11,16 +12,18 @@ import java.util.*;
 
 /**
  * Handles enrichment endpoints for listing enrichment (zone, POIs, vision, matching).
- * Job enqueueing triggers async processing; results are read from enrichment tables.
+ * Vision analysis is synchronous (OpenAI GPT-4 vision). Others queue async jobs.
  */
 @RestController
 @RequestMapping("/api/enrichment/listings/{id}")
 public class EnrichmentController {
 
     private final JdbcClient jdbc;
+    private final VisionService visionService;
 
-    public EnrichmentController(JdbcClient jdbc) {
+    public EnrichmentController(JdbcClient jdbc, VisionService visionService) {
         this.jdbc = jdbc;
+        this.visionService = visionService;
     }
 
     // ── Zone enrichment ────────────────────────────────────────────────────────
@@ -75,7 +78,7 @@ public class EnrichmentController {
 
     @GetMapping("/vision")
     public ResponseEntity<?> getVision(@PathVariable UUID id) {
-        var data = loadEnrichment(id, "vision");
+        var data = loadVisionSummary(id);
         var resp = new LinkedHashMap<String, Object>();
         resp.put("data", data);
         return ResponseEntity.ok(resp);
@@ -86,13 +89,20 @@ public class EnrichmentController {
                                            @AuthenticationPrincipal JwtClaims claims) {
         requireAdvertiserOwner(claims, id);
         enqueueJob(id, "listing_vision_enrichment");
-        return ResponseEntity.status(202).body(Map.of("data", Map.of("queued", true, "jobType", "listing_vision_enrichment")));
+        var result = visionService.analyzeListingImages(id);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @GetMapping("/vision/status")
     public ResponseEntity<?> visionStatus(@PathVariable UUID id) {
-        var status = getJobStatus(id, "listing_vision_enrichment");
-        return ResponseEntity.ok(Map.of("data", Map.of("status", status)));
+        var jobStatus = getJobStatus(id, "listing_vision_enrichment");
+        var visionSummary = loadVisionSummary(id);
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("listingId", id.toString());
+        resp.put("hasVisionSummary", visionSummary != null);
+        resp.put("latestJob", Map.of("status", jobStatus));
+        resp.put("visionSummary", visionSummary);
+        return ResponseEntity.ok(Map.of("data", resp));
     }
 
     // ── Matching enrichment ────────────────────────────────────────────────────
@@ -123,24 +133,87 @@ public class EnrichmentController {
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private Object loadEnrichment(UUID listingId, String type) {
+    private Object loadVisionSummary(UUID listingId) {
         return jdbc.sql("""
-                SELECT result::text, status, completed_at
-                FROM properia.listing_enrichments
-                WHERE listing_id = :id AND enrichment_type = :type
-                ORDER BY created_at DESC LIMIT 1
-                """).param("id", listingId).param("type", type)
+                SELECT version, provider, model, processed_at,
+                       styles_detected::text, style_primary, style_secondary,
+                       condition_ai::text, condition_confidence, quality_score,
+                       furniture_detected::text, rooms_detected::text,
+                       materials_detected::text, signals_detected::text,
+                       light_quality_score, spaciousness_score, layout_quality_score,
+                       premium_score, family_friendly_score, home_office_score, luxury_score,
+                       needs_human_review, raw_response::text
+                FROM properia.listing_ai_vision
+                WHERE listing_id = :id
+                """).param("id", listingId)
             .query((rs, n) -> {
+                var raw = rs.getString("raw_response");
                 var m = new LinkedHashMap<String, Object>();
-                m.put("listingId", listingId.toString());
-                m.put("type", type);
-                m.put("status", rs.getString("status"));
-                m.put("completedAt", rs.getTimestamp("completed_at") != null
-                    ? rs.getTimestamp("completed_at").toInstant().toString() : null);
-                var result = rs.getString("result");
-                m.put("result", result != null ? result : (Object) null);
+                m.put("version", rs.getInt("version"));
+                m.put("provider", rs.getString("provider"));
+                m.put("model", rs.getString("model"));
+                var pAt = rs.getTimestamp("processed_at");
+                m.put("processedAt", pAt != null ? pAt.toInstant().toString() : null);
+                m.put("conditionAi", raw != null ? extractRawString(raw, "conditionAi") : rs.getString("condition_ai"));
+                m.put("conditionConfidence", rs.getObject("condition_confidence"));
+                m.put("qualityScore", rs.getObject("quality_score"));
+                m.put("lightQualityScore", rs.getObject("light_quality_score"));
+                m.put("spaciousnessScore", rs.getObject("spaciousness_score"));
+                m.put("layoutQualityScore", rs.getObject("layout_quality_score"));
+                m.put("premiumScore", rs.getObject("premium_score"));
+                m.put("familyFriendlyScore", rs.getObject("family_friendly_score"));
+                m.put("homeOfficeScore", rs.getObject("home_office_score"));
+                m.put("luxuryScore", rs.getObject("luxury_score"));
+                m.put("needsHumanReview", rs.getBoolean("needs_human_review"));
+                m.put("stylePrimary", rs.getString("style_primary"));
+                m.put("styleSecondary", rs.getString("style_secondary"));
+                m.put("stylesDetected", parseJsonArray(rs.getString("styles_detected")));
+                m.put("furnitureDetected", parseJsonArray(rs.getString("furniture_detected")));
+                m.put("roomsDetected", parseJsonArray(rs.getString("rooms_detected")));
+                m.put("materialsDetected", parseJsonArray(rs.getString("materials_detected")));
+                m.put("signalsDetected", parseJsonArray(rs.getString("signals_detected")));
+                m.put("sellingPoints", raw != null ? extractRawArray(raw, "sellingPoints") : List.of());
+                m.put("buyerProfiles", raw != null ? extractRawArray(raw, "buyerProfiles") : List.of());
+                m.put("buyerProfilePrimary", raw != null ? extractRawString(raw, "buyerProfilePrimary") : null);
+                m.put("coherenceFlags", List.of());
+                m.put("photoRankings", List.of());
                 return (Object) m;
             }).optional().orElse(null);
+    }
+
+    private Object loadEnrichment(UUID listingId, String type) {
+        // Only zone/pois types — return empty for unknown types
+        return null;
+    }
+
+    private List<String> parseJsonArray(String json) {
+        if (json == null) return List.of();
+        try {
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            if (!node.isArray()) return List.of();
+            var list = new ArrayList<String>();
+            for (var item : node) { if (!item.isNull()) list.add(item.asText()); }
+            return list;
+        } catch (Exception e) { return List.of(); }
+    }
+
+    private List<String> extractRawArray(String raw, String field) {
+        try {
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw).path(field);
+            if (!node.isArray()) return List.of();
+            var list = new ArrayList<String>();
+            for (var item : node) { if (!item.isNull()) list.add(item.asText()); }
+            return list;
+        } catch (Exception e) { return List.of(); }
+    }
+
+    private String extractRawString(String raw, String field) {
+        try {
+            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(raw).path(field);
+            if (node.isNull() || node.isMissingNode()) return null;
+            var s = node.asText();
+            return s.isBlank() || "null".equals(s) ? null : s;
+        } catch (Exception e) { return null; }
     }
 
     private Object loadMatchingForUser(UUID listingId, UUID userId) {
