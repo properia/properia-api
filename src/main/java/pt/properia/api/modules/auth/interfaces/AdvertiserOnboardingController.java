@@ -224,8 +224,9 @@ public class AdvertiserOnboardingController {
                 FROM properia.advertisers a
                 JOIN properia.advertiser_users au ON au.advertiser_id = a.id
                 LEFT JOIN properia.advertiser_onboarding ao ON ao.advertiser_id = a.id
-                WHERE au.user_id = :uid AND au.membership_role = 'owner'
-                ORDER BY a.created_at DESC LIMIT 1
+                WHERE au.user_id = :uid
+                ORDER BY CASE WHEN au.membership_role = 'owner' THEN 0 ELSE 1 END, a.created_at DESC
+                LIMIT 1
                 """).param("uid", userId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
