@@ -113,14 +113,14 @@ public class MediaController {
 
         if (listingId != null) {
             var displayOrder = jdbc.sql("""
-                    SELECT COALESCE(MAX(display_order), 0) + 1
+                    SELECT COALESCE(MAX(sort_order), 0) + 1
                     FROM properia.listing_media WHERE listing_id = :lid
                     """).param("lid", listingId).query(Integer.class).single();
 
             jdbc.sql("""
                     INSERT INTO properia.listing_media
-                      (id, listing_id, url, media_type, display_order, file_name, is_hero, created_at, updated_at)
-                    VALUES (:id, :lid, :url, 'image', :order, :fn, false, now(), now())
+                      (id, listing_id, url, media_type, source_type, sort_order, file_name, is_cover, created_at, updated_at)
+                    VALUES (:id, :lid, :url, 'image', 'manual', :order, :fn, false, now(), now())
                     """)
                 .param("id", mediaId)
                 .param("lid", listingId)
