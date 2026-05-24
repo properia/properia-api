@@ -18,5 +18,5 @@ CREATE INDEX IF NOT EXISTS idx_media_upload_sessions_listing ON properia.media_u
 -- Add file_name to listing_media (not in original schema)
 ALTER TABLE properia.listing_media ADD COLUMN IF NOT EXISTS file_name text;
 
--- Ensure source_type has a default so manual uploads don't need to specify it
-ALTER TABLE properia.listing_media ALTER COLUMN source_type SET DEFAULT 'manual';
+-- Ensure source_type has a default so direct uploads don't need to specify it
+ALTER TABLE properia.listing_media ALTER COLUMN source_type SET DEFAULT 'upload';

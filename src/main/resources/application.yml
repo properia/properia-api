@@ -30,6 +30,7 @@ spring:
     baseline-on-migrate: false    # DB is already set up — do NOT baseline in production
     out-of-order: false
     validate-on-migrate: true
+    repair-on-migrate: true       # auto-repair failed migration checksums on startup
 
   # ── Jackson ──────────────────────────────────────────────────────────────────
   jackson:

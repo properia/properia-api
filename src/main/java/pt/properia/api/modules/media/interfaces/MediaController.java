@@ -120,7 +120,7 @@ public class MediaController {
             jdbc.sql("""
                     INSERT INTO properia.listing_media
                       (id, listing_id, url, media_type, source_type, sort_order, file_name, is_cover, created_at, updated_at)
-                    VALUES (:id, :lid, :url, 'image', 'manual', :order, :fn, false, now(), now())
+                    VALUES (:id, :lid, :url, 'image', 'upload', :order, :fn, false, now(), now())
                     """)
                 .param("id", mediaId)
                 .param("lid", listingId)
