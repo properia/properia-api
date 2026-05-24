@@ -101,7 +101,9 @@ public class OAuthController {
                           HttpServletResponse response) throws Exception {
         if (error != null || code == null) {
             clearOAuthCookies(response);
-            response.sendRedirect(appUrl + "/login?error=" + enc(error != null ? error : "callback_failed"));
+            String errCode = error != null ? enc(error) : "missing_code";
+            String dbg = "&dbg_code_null=" + (code == null) + "&dbg_error=" + (error != null ? enc(error) : "none");
+            response.sendRedirect(appUrl + "/login?error=" + errCode + dbg);
             return;
         }
 
@@ -111,7 +113,8 @@ public class OAuthController {
 
         if (storedState == null || !storedState.equals(state) || verifier == null) {
             clearOAuthCookies(response);
-            response.sendRedirect(appUrl + "/login?error=state_mismatch");
+            String dbg = "&dbg_stored_null=" + (storedState == null) + "&dbg_verifier_null=" + (verifier == null) + "&dbg_state_match=" + (storedState != null && storedState.equals(state));
+            response.sendRedirect(appUrl + "/login?error=state_mismatch" + dbg);
             return;
         }
 
