@@ -136,7 +136,7 @@ public class OAuthController {
             SessionUserDto session = authRepository.buildSessionUser(user.id());
             String token = buildToken(session);
             String dest = nextPath != null && nextPath.startsWith("/") ? nextPath : "/";
-            response.sendRedirect(appUrl + "/api/auth/exchange?token=" + enc(token) + "&next=" + enc(dest));
+            response.sendRedirect(appUrl + "/_auth/exchange?token=" + enc(token) + "&next=" + enc(dest));
         } catch (Exception e) {
             log.error("OAuth callback failed: {}", e.getMessage(), e);
             String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
