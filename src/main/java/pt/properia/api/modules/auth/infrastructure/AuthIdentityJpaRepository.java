@@ -16,7 +16,8 @@ interface AuthIdentityJpaRepository extends JpaRepository<UserAuthIdentity, UUID
     @Query("SELECT i FROM UserAuthIdentity i WHERE LOWER(i.email) = LOWER(:email) AND i.provider = 'local'")
     Optional<UserAuthIdentity> findLocalByEmail(@Param("email") String email);
 
-    Optional<UserAuthIdentity> findByProviderAndProviderUserId(String provider, String providerUserId);
+    @Query(value = "SELECT * FROM properia.user_auth_identities WHERE provider::text = :provider AND provider_user_id = :providerUserId", nativeQuery = true)
+    Optional<UserAuthIdentity> findByProviderAndProviderUserId(@Param("provider") String provider, @Param("providerUserId") String providerUserId);
 
     @Modifying
     @Transactional
