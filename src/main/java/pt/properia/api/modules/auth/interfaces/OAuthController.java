@@ -132,10 +132,8 @@ public class OAuthController {
 
             SessionUserDto session = authRepository.buildSessionUser(user.id());
             String token = buildToken(session);
-            setSessionCookie(response, token);
-
             String dest = nextPath != null && nextPath.startsWith("/") ? nextPath : "/";
-            response.sendRedirect(appUrl + dest);
+            response.sendRedirect(appUrl + "/auth-callback?token=" + enc(token) + "&next=" + enc(dest));
         } catch (Exception e) {
             log.warn("OAuth callback failed: {}", e.getMessage());
             response.sendRedirect(appUrl + "/login?error=callback_failed");
