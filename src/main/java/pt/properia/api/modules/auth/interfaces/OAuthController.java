@@ -135,8 +135,10 @@ public class OAuthController {
             String dest = nextPath != null && nextPath.startsWith("/") ? nextPath : "/";
             response.sendRedirect(appUrl + "/auth-callback?token=" + enc(token) + "&next=" + enc(dest));
         } catch (Exception e) {
-            log.warn("OAuth callback failed: {}", e.getMessage());
-            response.sendRedirect(appUrl + "/login?error=callback_failed");
+            log.error("OAuth callback failed: {}", e.getMessage(), e);
+            String detail = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String safe = detail.length() > 200 ? detail.substring(0, 200) : detail;
+            response.sendRedirect(appUrl + "/login?error=callback_failed&detail=" + enc(safe));
         }
     }
 
