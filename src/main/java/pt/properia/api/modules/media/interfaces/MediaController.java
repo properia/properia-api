@@ -157,6 +157,11 @@ public class MediaController {
                 .param("cover", isCover)
                 .param("hint", roomHint)
                 .update();
+
+            if (isCover) {
+                jdbc.sql("UPDATE properia.listings SET hero_image_url = :url, updated_at = now() WHERE id = :lid")
+                    .param("url", publicUrl).param("lid", listingId).update();
+            }
         }
 
         jdbc.sql("""
@@ -241,13 +246,14 @@ public class MediaController {
                 SELECT COALESCE(MAX(sort_order), 0) + 1
                 FROM properia.listing_media WHERE listing_id = :lid
                 """).param("lid", listingId).query(Integer.class).single();
+        boolean isCoverMedia = "image".equals(mediaType) && sortOrder == 1;
 
         jdbc.sql("""
                 INSERT INTO properia.listing_media
                   (id, listing_id, url, media_type, source_type, sort_order, file_name,
                    is_cover, room_hint, created_at, updated_at)
                 VALUES (:id, :lid, :url, CAST(:type AS properia.media_type), 'upload',
-                        :order, :fn, false, CAST(:hint AS properia.room_hint), now(), now())
+                        :order, :fn, :cover, CAST(:hint AS properia.room_hint), now(), now())
                 """)
             .param("id", mediaId)
             .param("lid", listingId)
@@ -255,8 +261,14 @@ public class MediaController {
             .param("type", mediaType)
             .param("order", sortOrder)
             .param("fn", safeName)
+            .param("cover", isCoverMedia)
             .param("hint", roomHint)
             .update();
+
+        if (isCoverMedia) {
+            jdbc.sql("UPDATE properia.listings SET hero_image_url = :url, updated_at = now() WHERE id = :lid")
+                .param("url", publicUrl).param("lid", listingId).update();
+        }
 
         var responseData = new LinkedHashMap<String, Object>();
         responseData.put("mediaId", mediaId.toString());
@@ -264,7 +276,7 @@ public class MediaController {
         responseData.put("listingId", listingId.toString());
         responseData.put("thumbnailUrl", null);
         responseData.put("sortOrder", sortOrder);
-        responseData.put("isCover", false);
+        responseData.put("isCover", isCoverMedia);
 
         return ResponseEntity.status(201).body(Map.of("data", responseData));
     }

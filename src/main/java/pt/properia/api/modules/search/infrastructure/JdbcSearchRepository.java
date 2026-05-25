@@ -43,8 +43,10 @@ public class JdbcSearchRepository implements SearchRepository {
               l.usable_area_m2, l.gross_area_m2, l.lot_area_m2,
               l.city, l.district, l.parish, l.neighborhood,
               loc.street, l.postal_code,
-              loc.location_precision, l.latitude, l.longitude,
-              l.hero_image_url,
+              loc.location_precision,
+              COALESCE(l.latitude, loc.latitude) AS latitude,
+              COALESCE(l.longitude, loc.longitude) AS longitude,
+              COALESCE(l.hero_image_url, lm.cover_url) AS hero_image_url,
               l.description_short,
               l.energy_rating,
               l.condition_final, l.furnished_final,
@@ -69,6 +71,13 @@ public class JdbcSearchRepository implements SearchRepository {
             LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id
             LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id
             LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id
+            LEFT JOIN LATERAL (
+                SELECT url AS cover_url
+                FROM properia.listing_media
+                WHERE listing_id = l.id AND media_type::text = 'image'
+                ORDER BY is_cover DESC, sort_order ASC
+                LIMIT 1
+            ) lm ON true
             """ + where.sql() + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset\n";
 
         var query = jdbc.sql(sql);
