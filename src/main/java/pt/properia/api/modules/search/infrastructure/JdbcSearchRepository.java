@@ -47,6 +47,7 @@ public class JdbcSearchRepository implements SearchRepository {
               COALESCE(l.latitude, loc.latitude) AS latitude,
               COALESCE(l.longitude, loc.longitude) AS longitude,
               COALESCE(l.hero_image_url, lm.cover_url) AS hero_image_url,
+              lm.image_urls_arr,
               l.description_short,
               l.energy_rating,
               l.condition_final, l.furnished_final,
@@ -72,11 +73,16 @@ public class JdbcSearchRepository implements SearchRepository {
             LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id
             LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id
             LEFT JOIN LATERAL (
-                SELECT url AS cover_url
-                FROM properia.listing_media
-                WHERE listing_id = l.id AND media_type::text = 'image'
-                ORDER BY is_cover DESC, sort_order ASC
-                LIMIT 1
+                SELECT
+                    (ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC))[1] AS cover_url,
+                    ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC) AS image_urls_arr
+                FROM (
+                    SELECT url, is_cover, sort_order
+                    FROM properia.listing_media
+                    WHERE listing_id = l.id AND media_type::text = 'image'
+                    ORDER BY is_cover DESC, sort_order ASC
+                    LIMIT 5
+                ) top_media
             ) lm ON true
             """ + where.sql() + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset\n";
 
@@ -327,7 +333,7 @@ public class JdbcSearchRepository implements SearchRepository {
             (Double) rs.getObject("latitude"),
             (Double) rs.getObject("longitude"),
             rs.getString("hero_image_url"),
-            List.of(), // imageUrls — loaded separately if needed
+            parseImageUrls(rs),
             rs.getString("floorplan_url"),
             rs.getString("youtube_tour_url"),
             rs.getString("description_short"),
@@ -363,6 +369,17 @@ public class JdbcSearchRepository implements SearchRepository {
             rs.getString("zone_label_primary"),
             rs.getString("zone_summary_short")
         );
+    }
+
+    private List<String> parseImageUrls(ResultSet rs) throws SQLException {
+        var arr = rs.getArray("image_urls_arr");
+        if (arr == null) return List.of();
+        try {
+            var urls = (String[]) arr.getArray();
+            return urls == null ? List.of() : Arrays.asList(urls);
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private String buildTipologia(ResultSet rs) throws SQLException {
