@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
 import pt.properia.api.modules.crm.application.visit.*;
 import pt.properia.api.modules.crm.interfaces.request.RequestVisitRequest;
 import pt.properia.api.shared.domain.DomainException;
@@ -22,16 +23,19 @@ public class VisitController {
     private final UpdateVisitStatusUseCase updateVisitStatus;
     private final GetVisitsUseCase getVisits;
     private final JdbcClient jdbc;
+    private final AuthEmailService emailService;
 
     public VisitController(
             RequestVisitUseCase requestVisit,
             UpdateVisitStatusUseCase updateVisitStatus,
             GetVisitsUseCase getVisits,
-            JdbcClient jdbc) {
+            JdbcClient jdbc,
+            AuthEmailService emailService) {
         this.requestVisit = requestVisit;
         this.updateVisitStatus = updateVisitStatus;
         this.getVisits = getVisits;
         this.jdbc = jdbc;
+        this.emailService = emailService;
     }
 
     // ── Buyer: request a visit ──────────────────────────────────────────────
@@ -368,7 +372,7 @@ public class VisitController {
                 .param("email", user.get("email")).param("hash", codeHash)
                 .param("exp", java.sql.Timestamp.from(expiresAt)).param("now", java.sql.Timestamp.from(now)).update();
         }
-        // Note: in production, email is sent by async service reading from the table
+        emailService.sendVisitEmailVerificationCode((String) user.get("email"), code);
         return ResponseEntity.ok(Map.of("data", Map.of(
             "email", user.get("email"), "sent", true, "cooldownSeconds", 60)));
     }

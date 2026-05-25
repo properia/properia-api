@@ -44,6 +44,18 @@ public class AuthEmailService {
         );
     }
 
+    public void sendVisitEmailVerificationCode(String to, String code) {
+        send(to,
+            "O teu código de verificação Properia",
+            html("O teu código de verificação",
+                "Usa o código abaixo para verificares o teu email e agendares visitas na Properia.<br><br>" +
+                "<span style=\"font-size:32px;font-weight:700;letter-spacing:8px;color:#1a1a1a\">" + code + "</span><br><br>" +
+                "O código expira em 10 minutos.",
+                "Abrir Properia", appUrl + "/visitas"),
+            "O teu código de verificação na Properia: " + code + " (válido 10 minutos)"
+        );
+    }
+
     public void sendPasswordReset(String to, String token) {
         String url = appUrl + "/repor-palavra-passe?token=" + token;
         send(to,
