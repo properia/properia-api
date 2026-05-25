@@ -64,8 +64,9 @@ public class ZoneSnapshotService {
             .optional();
 
         if (existing.isPresent() && "processed".equals(existing.get().get("status"))) {
-            log.debug("Zone snapshot already processed for listing {} at {}", listingId, fingerprint);
-            return;
+            // Mark stale so it is eligible for reprocessing on next trigger
+            jdbc.sql("UPDATE properia.listing_zone_snapshots SET status = 'stale', updated_at = now() WHERE id = :id")
+                .param("id", UUID.fromString((String) existing.get().get("id"))).update();
         }
 
         var snapshotId = existing.isPresent()
