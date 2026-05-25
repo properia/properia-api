@@ -16,6 +16,7 @@ public class AuthEmailService {
     private final WebClient resendClient;
     private final String from;
     private final String appUrl;
+    private final boolean enabled;
 
     public AuthEmailService(
         @Value("${properia.email.resend-api-key:}") String resendApiKey,
@@ -24,6 +25,7 @@ public class AuthEmailService {
     ) {
         this.from = from;
         this.appUrl = appUrl;
+        this.enabled = resendApiKey != null && !resendApiKey.isBlank();
         this.resendClient = WebClient.builder()
             .baseUrl("https://api.resend.com")
             .defaultHeader("Authorization", "Bearer " + resendApiKey)
@@ -54,8 +56,8 @@ public class AuthEmailService {
     }
 
     private void send(String to, String subject, String htmlBody, String textBody) {
-        if (resendClient == null) {
-            log.info("Email not sent (no API key): to={} subject={}", to, subject);
+        if (!enabled) {
+            log.info("Email not sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
             return;
         }
         try {
@@ -69,13 +71,18 @@ public class AuthEmailService {
                     "text", textBody
                 ))
                 .retrieve()
+                .onStatus(status -> !status.is2xxSuccessful(), resp ->
+                    resp.bodyToMono(String.class).doOnNext(body ->
+                        log.error("Resend API error {}: {}", resp.statusCode().value(), body)
+                    ).thenReturn(new RuntimeException("Resend error " + resp.statusCode().value()))
+                )
                 .toBodilessEntity()
                 .subscribe(
-                    ignored -> log.debug("Email sent to {}", to),
-                    err -> log.warn("Failed to send email to {}: {}", to, err.getMessage())
+                    ignored -> log.info("Email sent: to={} subject={}", to, subject),
+                    err -> log.error("Failed to send email to={} subject={}: {}", to, subject, err.getMessage())
                 );
         } catch (Exception e) {
-            log.warn("Email send error to {}: {}", to, e.getMessage());
+            log.error("Email send error to={} subject={}: {}", to, subject, e.getMessage());
         }
     }
 

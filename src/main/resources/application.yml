@@ -154,7 +154,7 @@ properia:
 
   email:
     resend-api-key: ${RESEND_API_KEY:}
-    from: ${EMAIL_FROM:"Properia <noreply@properia.pt>"}
+    from: ${EMAIL_FROM:Properia <noreply@properia.pt>}
 
   worker:
     poll-interval-ms: ${WORKER_POLL_INTERVAL_MS:4000}
@@ -165,7 +165,7 @@ properia:
     allowed-emails: ${AUTH_ALLOWED_ADMIN_EMAILS:admin@properia.pt}
 
   app:
-    url: ${APP_URL:http://localhost:3000}
+    url: ${APP_URL:https://properia.pt}
 
   oauth:
     issuer-url: ${AUTH_ISSUER_URL:https://accounts.google.com}
