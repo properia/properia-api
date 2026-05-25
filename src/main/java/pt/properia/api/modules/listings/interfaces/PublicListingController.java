@@ -32,7 +32,55 @@ public class PublicListingController {
     @GetMapping("/{publicId}")
     public ResponseEntity<?> getByPublicId(@PathVariable String publicId) {
         var listing = getPublicListingUseCase.execute(new GetPublicListingUseCase.Query(publicId));
-        return ResponseEntity.ok(Map.of("data", listing));
+
+        // Enrich with zone snapshot data
+        @SuppressWarnings("unchecked")
+        var listingMap = (java.util.LinkedHashMap<String, Object>) objectMapper.convertValue(listing, java.util.LinkedHashMap.class);
+        var listingId  = listingMap.get("id");
+        if (listingId != null) {
+            try {
+                var zoneData = loadZoneSnapshot(UUID.fromString(listingId.toString()));
+                listingMap.put("zoneProcessingStatus", zoneData.get("status"));
+                listingMap.put("zoneSummaryV2",        zoneData.get("payload"));
+            } catch (Exception e) {
+                listingMap.put("zoneProcessingStatus", "not_processed");
+                listingMap.put("zoneSummaryV2",        null);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("data", listingMap));
+    }
+
+    private Map<String, Object> loadZoneSnapshot(UUID listingId) {
+        return jdbc.sql("""
+            SELECT status, payload
+            FROM properia.listing_zone_snapshots
+            WHERE listing_id = :lid
+            ORDER BY updated_at DESC LIMIT 1
+            """)
+            .param("lid", listingId)
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("status", rs.getString("status"));
+                var payloadStr = rs.getString("payload");
+                if (payloadStr != null && !payloadStr.equals("{}")) {
+                    try {
+                        m.put("payload", objectMapper.readValue(payloadStr, Object.class));
+                    } catch (Exception e) {
+                        m.put("payload", null);
+                    }
+                } else {
+                    m.put("payload", null);
+                }
+                return m;
+            })
+            .optional()
+            .orElseGet(() -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("status", "not_processed");
+                m.put("payload", null);
+                return m;
+            });
     }
 
     // ── Similar listings ───────────────────────────────────────────────────────

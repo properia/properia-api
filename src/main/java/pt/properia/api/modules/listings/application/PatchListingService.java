@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import pt.properia.api.modules.zone.application.ZoneSnapshotService;
 import pt.properia.api.shared.domain.DomainException;
 
 import java.math.BigDecimal;
@@ -21,11 +22,14 @@ public class PatchListingService {
     private final ListingRepository repository;
     private final JdbcClient jdbc;
     private final ObjectMapper json;
+    private final ZoneSnapshotService zoneSnapshotService;
 
-    public PatchListingService(ListingRepository repository, JdbcClient jdbc, ObjectMapper json) {
+    public PatchListingService(ListingRepository repository, JdbcClient jdbc, ObjectMapper json,
+                                ZoneSnapshotService zoneSnapshotService) {
         this.repository = repository;
         this.jdbc = jdbc;
         this.json = json;
+        this.zoneSnapshotService = zoneSnapshotService;
     }
 
     @SuppressWarnings("unchecked")
@@ -118,6 +122,25 @@ public class PatchListingService {
         if (body.containsKey("longitude")) listing.setLongitude(doubleOrNull(body, "longitude"));
 
         var saved = repository.save(listing);
+
+        // ── Zone snapshot trigger ─────────────────────────────────────────────
+        // Trigger async zone processing when listing is published with coordinates.
+        // Also re-triggers if coordinates changed while already published.
+        boolean nowPublished = "published".equals(saved.getStatus());
+        boolean hasCoords    = saved.getLatitude() != null && saved.getLongitude() != null;
+        boolean coordsOrStatusChanged = body.containsKey("status") || body.containsKey("latitude") || body.containsKey("longitude");
+        if (nowPublished && hasCoords && coordsOrStatusChanged) {
+            var locSnap = getLocationForZone(saved.getId());
+            zoneSnapshotService.processAsync(
+                saved.getId(),
+                saved.getLatitude(),
+                saved.getLongitude(),
+                locSnap.get("street"),
+                locSnap.get("neighborhood") != null ? locSnap.get("neighborhood") : saved.getNeighborhood(),
+                saved.getCity(),
+                locSnap.get("precision")
+            );
+        }
 
         // ── Location sub-entity ───────────────────────────────────────────────
         boolean hasLocationFields = body.containsKey("city") || body.containsKey("district")
@@ -280,6 +303,25 @@ public class PatchListingService {
         }
 
         return resp;
+    }
+
+    // ── Zone helpers ──────────────────────────────────────────────────────────
+
+    private Map<String, String> getLocationForZone(UUID listingId) {
+        return jdbc.sql("""
+            SELECT street, neighborhood, location_precision AS precision
+            FROM properia.listing_location WHERE listing_id = :lid
+            """)
+            .param("lid", listingId)
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, String>();
+                m.put("street",       rs.getString("street"));
+                m.put("neighborhood", rs.getString("neighborhood"));
+                m.put("precision",    rs.getString("precision"));
+                return m;
+            })
+            .optional()
+            .orElseGet(java.util.LinkedHashMap::new);
     }
 
     // ── Type helpers ──────────────────────────────────────────────────────────
