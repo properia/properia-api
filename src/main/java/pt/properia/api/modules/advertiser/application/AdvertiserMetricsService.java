@@ -254,8 +254,10 @@ public class AdvertiserMetricsService {
 
     public Map<String, Object> getPulse(UUID advertiserId) {
         var now = Instant.now();
-        var sevenDaysAgo = now.minus(7, ChronoUnit.DAYS);
-        var thirtyDaysAgo = now.minus(30, ChronoUnit.DAYS);
+        var ts7dAgo  = java.sql.Timestamp.from(now.minus(7, ChronoUnit.DAYS));
+        var ts30dAgo = java.sql.Timestamp.from(now.minus(30, ChronoUnit.DAYS));
+        var ts48hAgo = java.sql.Timestamp.from(now.minus(48, ChronoUnit.HOURS));
+        var ts72hAgo = java.sql.Timestamp.from(now.minus(72, ChronoUnit.HOURS));
 
         // Week label (ISO week / year)
         var today = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Lisbon"));
@@ -286,7 +288,7 @@ public class AdvertiserMetricsService {
                 SELECT COUNT(*) FROM properia.leads
                 WHERE advertiser_id = :adv AND created_at > :since
                 """)
-            .param("adv", advertiserId).param("since", sevenDaysAgo)
+            .param("adv", advertiserId).param("since", ts7dAgo)
             .query(Long.class).single().intValue();
 
         // Response rate: leads in last 30 days that moved past 'new' / total
@@ -294,14 +296,14 @@ public class AdvertiserMetricsService {
                 SELECT COUNT(*) FROM properia.leads
                 WHERE advertiser_id = :adv AND created_at > :since
                 """)
-            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .param("adv", advertiserId).param("since", ts30dAgo)
             .query(Long.class).single();
         long respondedLast30 = jdbc.sql("""
                 SELECT COUNT(*) FROM properia.leads
                 WHERE advertiser_id = :adv AND created_at > :since
                   AND stage::text NOT IN ('new','lost')
                 """)
-            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .param("adv", advertiserId).param("since", ts30dAgo)
             .query(Long.class).single();
         double responseRate = leadsLast30 > 0 ? (double) respondedLast30 / leadsLast30 : 0.0;
 
@@ -313,7 +315,7 @@ public class AdvertiserMetricsService {
                 WHERE v.advertiser_id = :adv AND l.created_at > :since
                 GROUP BY v.status
                 """)
-            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .param("adv", advertiserId).param("since", ts30dAgo)
             .query((rs, n) -> Map.entry(rs.getString("status"), (int) rs.getLong("cnt")))
             .list();
         var visitsRequested = visitStats.stream()
@@ -337,8 +339,8 @@ public class AdvertiserMetricsService {
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
-            .param("slaCutoff", now.minus(48, ChronoUnit.HOURS))
-            .param("proposalCutoff", now.minus(72, ChronoUnit.HOURS))
+            .param("slaCutoff", ts48hAgo)
+            .param("proposalCutoff", ts72hAgo)
             .query((rs, n) -> {
                 var ts = rs.getTimestamp("updated_at");
                 long days = ts != null ? ChronoUnit.DAYS.between(ts.toInstant(), now) : 0;
