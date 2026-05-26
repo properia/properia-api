@@ -246,11 +246,16 @@ public class MediaController {
             ? file.getOriginalFilename().replaceAll("[^a-zA-Z0-9._-]", "_") : "upload.bin";
         var objectKey = "listings/" + listingId + "/" + sessionId + "-" + safeName;
 
-        // Fallback always stores locally — R2 direct upload is preferred via createUploadSession
-        var publicUrl = buildPublicUrl(objectKey);
-        var target = resolveLocalPath(objectKey);
-        Files.createDirectories(target.getParent());
-        file.transferTo(target);
+        String publicUrl;
+        if (r2.isConfigured()) {
+            // Upload directly to R2 server-side — avoids /tmp ephemerality and CORS issues
+            publicUrl = r2.uploadBytes(objectKey, file.getBytes(), file.getContentType());
+        } else {
+            var target = resolveLocalPath(objectKey);
+            Files.createDirectories(target.getParent());
+            file.transferTo(target);
+            publicUrl = buildPublicUrl(objectKey);
+        }
 
         var mediaId = UUID.randomUUID();
         var sortOrder = jdbc.sql("""

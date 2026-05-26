@@ -6,9 +6,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.net.URI;
@@ -33,6 +35,36 @@ public class R2UploadService {
     }
 
     public record PresignedUpload(String uploadUrl, String publicUrl, String objectKey) {}
+
+    /** Direct server-side upload to R2 — used when browser cannot do presigned PUT (CORS). */
+    public String uploadBytes(String objectKey, byte[] bytes, String contentType) {
+        var endpoint = URI.create("https://" + props.getAccountId() + ".r2.cloudflarestorage.com");
+        var credentials = AwsBasicCredentials.create(props.getAccessKeyId(), props.getSecretAccessKey());
+
+        try (var s3 = S3Client.builder()
+                .region(Region.of("auto"))
+                .endpointOverride(endpoint)
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .build()) {
+
+            var ct = (contentType != null && !contentType.isBlank()) ? contentType : "image/jpeg";
+            s3.putObject(
+                PutObjectRequest.builder()
+                    .bucket(props.getBucket())
+                    .key(objectKey)
+                    .contentType(ct)
+                    .build(),
+                RequestBody.fromBytes(bytes)
+            );
+
+            var publicUrl = cdnBaseUrl.isBlank()
+                ? "https://" + props.getAccountId() + ".r2.cloudflarestorage.com/" + props.getBucket() + "/" + objectKey
+                : cdnBaseUrl + "/" + objectKey;
+
+            log.info("R2 direct upload: objectKey={} size={} publicUrl={}", objectKey, bytes.length, publicUrl);
+            return publicUrl;
+        }
+    }
 
     public PresignedUpload createPresignedUpload(String objectKey, String contentType) {
         var endpoint = URI.create("https://" + props.getAccountId() + ".r2.cloudflarestorage.com");

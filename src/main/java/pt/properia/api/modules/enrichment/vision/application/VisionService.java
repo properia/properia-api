@@ -120,9 +120,11 @@ public class VisionService {
             .toList();
 
         if (!all.isEmpty() && resolved.isEmpty()) {
-            log.warn("Listing {} has {} images but none could be resolved for Vision analysis.", listingId, all.size());
+            log.warn("Listing {} — {} images in DB but none resolved. URLs: {}", listingId, all.size(), all);
+            var sample = all.get(0);
             throw new DomainException("NO_PUBLIC_MEDIA",
-                "As imagens deste anúncio não são acessíveis. Verifica se as fotos foram guardadas corretamente.", 422);
+                "As imagens não estão acessíveis para análise IA (ex: \"" + sample + "\"). " +
+                "Volta a fazer upload das fotos e tenta novamente.", 422);
         }
 
         return resolved;
