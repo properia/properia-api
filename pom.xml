@@ -143,9 +143,25 @@
         </dependency>
 
         <!-- ── Cloudflare R2 / S3-compatible storage ────────────────── -->
+        <!-- Exclude AWS Netty/Apache HTTP clients to avoid conflict with Spring WebFlux Netty -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
+            <version>2.26.7</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
             <version>2.26.7</version>
         </dependency>
 
