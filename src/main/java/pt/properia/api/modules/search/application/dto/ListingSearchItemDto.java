@@ -73,5 +73,6 @@ public record ListingSearchItemDto(
     Instant publishedAt,
     Instant updatedAt,
     String zoneLabelPrimary,
-    String zoneSummaryShort
+    String zoneSummaryShort,
+    int detailViewsTotal
 ) {}

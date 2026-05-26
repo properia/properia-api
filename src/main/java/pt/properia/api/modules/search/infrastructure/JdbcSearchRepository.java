@@ -65,7 +65,8 @@ public class JdbcSearchRepository implements SearchRepository {
               l.is_immediately_available, l.available_from,
               l.published_at, l.updated_at,
               com.floorplan_url, com.youtube_tour_url,
-              zs.zone_label_primary, zs.zone_summary_short
+              zs.zone_label_primary, zs.zone_summary_short,
+              (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total
             FROM properia.listings l
             LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id
             LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
@@ -367,7 +368,8 @@ public class JdbcSearchRepository implements SearchRepository {
             publishedAt != null ? publishedAt.toInstant() : null,
             updatedAt != null ? updatedAt.toInstant() : null,
             rs.getString("zone_label_primary"),
-            rs.getString("zone_summary_short")
+            rs.getString("zone_summary_short"),
+            rs.getInt("detail_views_total")
         );
     }
 

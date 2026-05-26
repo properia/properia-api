@@ -46,6 +46,14 @@ public class PublicListingController {
                 listingMap.put("zoneProcessingStatus", "not_processed");
                 listingMap.put("zoneSummaryV2",        null);
             }
+            try {
+                var viewsTotal = jdbc.sql("SELECT COUNT(*) FROM properia.listing_detail_views WHERE listing_id = :id")
+                    .param("id", UUID.fromString(listingId.toString()))
+                    .query(Long.class).single();
+                listingMap.put("detailViewsTotal", viewsTotal.intValue());
+            } catch (Exception e) {
+                listingMap.put("detailViewsTotal", 0);
+            }
         }
 
         return ResponseEntity.ok(Map.of("data", listingMap));
@@ -106,12 +114,13 @@ public class PublicListingController {
         var items = jdbc.sql("""
                 SELECT id, public_id, title, price_amount, price_currency, usable_area_m2,
                        bedrooms, property_type, business_type, city, neighborhood,
-                       hero_image_url, published_at
-                FROM properia.listings
+                       hero_image_url, published_at,
+                       (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total
+                FROM properia.listings l
                 WHERE status = 'published'
                   AND business_type::text = :bt
                   AND property_type::text = :pt
-                  AND id != :id
+                  AND l.id != :id
                   AND (:district = '' OR district = :district)
                 ORDER BY RANDOM() LIMIT 6
                 """)
@@ -136,6 +145,7 @@ public class PublicListingController {
                 m.put("dataPublicacao", rs.getTimestamp("published_at") != null
                     ? rs.getTimestamp("published_at").toInstant().toString()
                     : new Date().toInstant().toString());
+                m.put("detailViewsTotal", rs.getInt("detail_views_total"));
                 return (Map<String, Object>) m;
             }).list();
 
@@ -272,7 +282,8 @@ public class PublicListingController {
                        l.sun_exposure,
                        loc.location_precision, loc.street,
                        zs.zone_label_primary, zs.zone_summary_short,
-                       a.brand_name as advertiser_name
+                       a.brand_name as advertiser_name,
+                       (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total
                 FROM properia.listings l
                 LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
                 LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id
@@ -329,6 +340,7 @@ public class PublicListingController {
                 m.put("featureTags", List.of());
                 m.put("tipologia", null);
                 m.put("imageUrls", List.of());
+                m.put("detailViewsTotal", rs.getInt("detail_views_total"));
                 return (Map<String, Object>) m;
             }).list();
         return ResponseEntity.ok(Map.of("data", Map.of("items", items)));
