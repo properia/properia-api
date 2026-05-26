@@ -63,15 +63,20 @@ public class NominatimGeocodingService {
             streetFull = streetFull + " " + streetNumber.strip();
         }
 
-        // 1st attempt: structured search (most accurate for PT addresses)
+        // 1st: structured with all fields (street + postal + city)
         var candidates = tryStructured(streetFull, postalCode, city, parish);
 
-        // 2nd attempt: free-text fallback if structured found nothing
+        // 2nd: structured without postal code — Nominatim often doesn't index PT postal codes
+        if (candidates.isEmpty() && streetFull != null) {
+            candidates = tryStructured(streetFull, null, city, parish);
+        }
+
+        // 3rd: free-text fallback
         if (candidates.isEmpty()) {
             candidates = tryFreeText(streetFull, postalCode, city, parish, district);
         }
 
-        // 3rd attempt: postal code only (gives at least a neighborhood/city)
+        // 4th: postal code + city only (at least finds the neighborhood/city)
         if (candidates.isEmpty() && postalCode != null && !postalCode.isBlank()) {
             candidates = tryStructured(null, postalCode, city, null);
         }
@@ -85,11 +90,10 @@ public class NominatimGeocodingService {
                                                          String city, String parish) {
         try {
             var sb = new StringBuilder("?format=jsonv2&limit=5&countrycodes=pt&addressdetails=1");
-            if (street != null && !street.isBlank())      sb.append("&street=").append(enc(street));
+            if (street != null && !street.isBlank())         sb.append("&street=").append(enc(street));
             if (postalCode != null && !postalCode.isBlank()) sb.append("&postalcode=").append(enc(postalCode));
-            if (city != null && !city.isBlank())          sb.append("&city=").append(enc(city));
-            else if (parish != null && !parish.isBlank()) sb.append("&city=").append(enc(parish));
-            sb.append("&countrycodes=pt");
+            if (city != null && !city.isBlank())             sb.append("&city=").append(enc(city));
+            else if (parish != null && !parish.isBlank())    sb.append("&city=").append(enc(parish));
 
             var results = nominatimSearch(sb.toString());
             if (results.isEmpty() || results.get(0).isEmpty()) return List.of();
