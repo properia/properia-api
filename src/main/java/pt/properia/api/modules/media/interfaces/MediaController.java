@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import pt.properia.api.modules.media.infrastructure.R2UploadService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -24,12 +25,14 @@ public class MediaController {
 
     private final JdbcClient jdbc;
     private final Path localStorageDir;
+    private final R2UploadService r2;
 
     @Value("${properia.storage.bucket-url:}")
     private String bucketUrl;
 
-    public MediaController(JdbcClient jdbc) {
+    public MediaController(JdbcClient jdbc, R2UploadService r2) {
         this.jdbc = jdbc;
+        this.r2 = r2;
         this.localStorageDir = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads");
         try {
             Files.createDirectories(localStorageDir);
@@ -68,8 +71,15 @@ public class MediaController {
             .param("exp", java.sql.Timestamp.from(expiresAt))
             .update();
 
-        var uploadUrl = buildUploadUrl(objectKey);
-        var publicUrl = buildPublicUrl(objectKey);
+        String uploadUrl, publicUrl;
+        if (r2.isConfigured()) {
+            var presigned = r2.createPresignedUpload(objectKey, contentType);
+            uploadUrl = presigned.uploadUrl();
+            publicUrl = presigned.publicUrl();
+        } else {
+            uploadUrl = buildUploadUrl(objectKey);
+            publicUrl = buildPublicUrl(objectKey);
+        }
 
         var data = new LinkedHashMap<String, Object>();
         data.put("sessionId", sessionId.toString());
@@ -235,8 +245,9 @@ public class MediaController {
         var safeName = file.getOriginalFilename() != null
             ? file.getOriginalFilename().replaceAll("[^a-zA-Z0-9._-]", "_") : "upload.bin";
         var objectKey = "listings/" + listingId + "/" + sessionId + "-" + safeName;
-        var publicUrl = buildPublicUrl(objectKey);
 
+        // Fallback always stores locally — R2 direct upload is preferred via createUploadSession
+        var publicUrl = buildPublicUrl(objectKey);
         var target = resolveLocalPath(objectKey);
         Files.createDirectories(target.getParent());
         file.transferTo(target);
