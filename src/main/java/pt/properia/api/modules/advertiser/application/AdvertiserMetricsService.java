@@ -250,63 +250,156 @@ public class AdvertiserMetricsService {
             .list();
     }
 
-    // ── Pulse (top 8 automation tasks) ────────────────────────────────────────
+    // ── Pulse ─────────────────────────────────────────────────────────────────
 
-    public record PulseItem(String id, String leadId, String listingId, String title,
-                            String description, String actionLabel, String priority,
-                            String createdAt, String href) {}
+    public Map<String, Object> getPulse(UUID advertiserId) {
+        var now = Instant.now();
+        var sevenDaysAgo = now.minus(7, ChronoUnit.DAYS);
+        var thirtyDaysAgo = now.minus(30, ChronoUnit.DAYS);
 
-    public record PulseDto(List<PulseItem> items) {}
+        // Week label (ISO week / year)
+        var today = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Lisbon"));
+        var week = today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+        var weekYear = today.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR);
+        var weekLabel = week + "/" + weekYear;
 
-    public PulseDto getPulse(UUID advertiserId) {
-        var followUpHours = 48;
-        var proposalHours = 72;
+        // Funnel: count active leads per stage
+        var funnelMap = new LinkedHashMap<String, Object>();
+        funnelMap.put("new", 0); funnelMap.put("contacted", 0);
+        funnelMap.put("qualified", 0); funnelMap.put("proposal", 0);
+        funnelMap.put("won", 0); funnelMap.put("lost", 0);
+        jdbc.sql("""
+                SELECT stage::text, COUNT(*) AS cnt FROM properia.leads
+                WHERE advertiser_id = :adv
+                GROUP BY stage
+                """)
+            .param("adv", advertiserId)
+            .query((rs, n) -> Map.entry(rs.getString("stage"), (int) rs.getLong("cnt")))
+            .list()
+            .forEach(e -> funnelMap.put(e.getKey(), e.getValue()));
 
-        var rows = jdbc.sql("""
-                SELECT l.id AS lead_id, l.listing_id, l.stage, l.created_at,
-                       li.title AS listing_title,
-                       (l.metadata::jsonb ->> 'contactName') AS contact_name
+        int pipelineLeads = ((Integer) funnelMap.getOrDefault("qualified", 0))
+            + ((Integer) funnelMap.getOrDefault("proposal", 0));
+
+        // New leads in last 7 days
+        var newLeads = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.leads
+                WHERE advertiser_id = :adv AND created_at > :since
+                """)
+            .param("adv", advertiserId).param("since", sevenDaysAgo)
+            .query(Long.class).single().intValue();
+
+        // Response rate: leads in last 30 days that moved past 'new' / total
+        long leadsLast30 = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.leads
+                WHERE advertiser_id = :adv AND created_at > :since
+                """)
+            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .query(Long.class).single();
+        long respondedLast30 = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.leads
+                WHERE advertiser_id = :adv AND created_at > :since
+                  AND stage::text NOT IN ('new','lost')
+                """)
+            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .query(Long.class).single();
+        double responseRate = leadsLast30 > 0 ? (double) respondedLast30 / leadsLast30 : 0.0;
+
+        // Visits (use lead join same as getMetrics)
+        var visitStats = jdbc.sql("""
+                SELECT v.status::text, COUNT(*) AS cnt
+                FROM properia.visits v
+                JOIN properia.leads l ON l.id = v.lead_id
+                WHERE v.advertiser_id = :adv AND l.created_at > :since
+                GROUP BY v.status
+                """)
+            .param("adv", advertiserId).param("since", thirtyDaysAgo)
+            .query((rs, n) -> Map.entry(rs.getString("status"), (int) rs.getLong("cnt")))
+            .list();
+        var visitsRequested = visitStats.stream()
+            .filter(e -> "requested".equals(e.getKey())).mapToInt(Map.Entry::getValue).sum();
+        var visitsConfirmed = visitStats.stream()
+            .filter(e -> "confirmed".equals(e.getKey())).mapToInt(Map.Entry::getValue).sum();
+
+        // At-risk leads (stalled > 48h in non-proposal, > 72h in proposal)
+        var atRiskRows = jdbc.sql("""
+                SELECT l.id::text, l.stage::text, l.contact_name,
+                       l.updated_at, li.title AS listing_title
                 FROM properia.leads l
                 JOIN properia.listings li ON li.id = l.listing_id
                 WHERE l.advertiser_id = :adv
-                  AND l.stage NOT IN ('won','lost')
-                ORDER BY l.created_at
+                  AND l.stage::text NOT IN ('won','lost')
+                  AND (
+                    (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
+                    OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
+                  )
+                ORDER BY l.updated_at ASC
+                LIMIT 10
                 """)
             .param("adv", advertiserId)
-            .query((rs, n) -> new Object[]{
-                rs.getString("lead_id"),
-                rs.getString("listing_id"),
-                rs.getString("stage"),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getString("listing_title"),
-                rs.getString("contact_name")
+            .param("slaCutoff", now.minus(48, ChronoUnit.HOURS))
+            .param("proposalCutoff", now.minus(72, ChronoUnit.HOURS))
+            .query((rs, n) -> {
+                var ts = rs.getTimestamp("updated_at");
+                long days = ts != null ? ChronoUnit.DAYS.between(ts.toInstant(), now) : 0;
+                var stage = rs.getString("stage");
+                var row = new LinkedHashMap<String, Object>();
+                row.put("id", rs.getString("id"));
+                row.put("contactName", rs.getString("contact_name"));
+                row.put("listingTitle", Objects.requireNonNullElse(rs.getString("listing_title"), "Imóvel"));
+                row.put("stage", stage);
+                row.put("daysSinceActivity", (int) Math.max(days, 1));
+                row.put("reason", "proposal".equals(stage) ? "stalled_proposal" : "sla_breached");
+                return row;
             })
             .list();
 
-        var now = Instant.now();
-        var items = new ArrayList<PulseItem>();
-        for (var row : rows) {
-            var stage = (String) row[2];
-            var createdAt = (Instant) row[3];
-            double ageHours = (double) ChronoUnit.MINUTES.between(createdAt, now) / 60.0;
-            int threshold = "proposal".equals(stage) ? proposalHours : followUpHours;
-            if (ageHours < threshold) continue;
+        int atRiskCount = atRiskRows.size();
 
-            boolean isProposal = "proposal".equals(stage);
-            var priority = isProposal || ageHours >= threshold * 2 ? "high" : "medium";
-            var contactName = row[5] != null ? (String) row[5] : "Lead sem nome";
-            var title = isProposal ? "Fazer follow-up da proposta" : "Responder ao lead em atraso";
-            var description = contactName + " em " + row[4] + ". Último ponto conhecido: " + stage + ".";
-            var actionLabel = isProposal ? "Retomar proposta" : "Responder agora";
-
-            items.add(new PulseItem(
-                "automation-" + row[0],
-                (String) row[0], (String) row[1],
-                title, description, actionLabel, priority,
-                createdAt.toString(), "/anunciante/leads"
-            ));
-            if (items.size() >= 8) break;
+        // Health score
+        String healthScore;
+        if (atRiskCount == 0 && responseRate >= 0.6) {
+            healthScore = "good";
+        } else if (atRiskCount <= 2 || responseRate >= 0.3) {
+            healthScore = "attention";
+        } else {
+            healthScore = "risk";
         }
-        return new PulseDto(items);
+
+        // Forecast
+        var forecast = new LinkedHashMap<String, Object>();
+        forecast.put("pipelineLeads", pipelineLeads);
+        forecast.put("closingsMin", (int) Math.floor(pipelineLeads * 0.2));
+        forecast.put("closingsMax", (int) Math.ceil(pipelineLeads * 0.4));
+
+        // Insight (static based on health)
+        var insight = new LinkedHashMap<String, Object>();
+        if ("good".equals(healthScore)) {
+            insight.put("headline", "Operação em boa forma esta semana");
+            insight.put("detail", "A carteira está equilibrada. Mantém o ritmo de resposta para preservar a taxa de conversão.");
+        } else if ("attention".equals(healthScore)) {
+            insight.put("headline", atRiskCount + " contacto" + (atRiskCount == 1 ? "" : "s") + " precisa" + (atRiskCount == 1 ? "" : "m") + " de seguimento");
+            insight.put("detail", "Alguns leads estão a ficar sem resposta. Prioriza os mais antigos para não perder oportunidades.");
+        } else {
+            insight.put("headline", "Vários contactos em risco de fuga");
+            insight.put("detail", "A taxa de resposta está baixa e há leads sem seguimento. Actua hoje para recuperar o ritmo comercial.");
+        }
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("weekLabel", weekLabel);
+        result.put("healthScore", healthScore);
+        result.put("newLeads", newLeads);
+        result.put("responseRate", Math.round(responseRate * 100.0) / 100.0);
+        result.put("visitsConfirmed", visitsConfirmed);
+        result.put("visitsRequested", visitsRequested);
+        result.put("avgResponseMinutes", null);
+        result.put("atRiskCount", atRiskCount);
+        result.put("funnel", funnelMap);
+        result.put("forecast", forecast);
+        result.put("atRiskLeads", atRiskRows);
+        result.put("insight", insight);
+        result.put("isPro", true);
+        result.put("generatedAt", now.toString());
+        return result;
     }
 }
