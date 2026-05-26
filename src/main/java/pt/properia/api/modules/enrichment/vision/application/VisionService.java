@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.modules.enrichment.vision.infrastructure.OpenAIProperties;
@@ -61,11 +62,14 @@ public class VisionService {
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final HttpClient http;
+    private final String apiBaseUrl;
 
-    public VisionService(OpenAIProperties props, JdbcClient jdbc, ObjectMapper json) {
+    public VisionService(OpenAIProperties props, JdbcClient jdbc, ObjectMapper json,
+                         @Value("${properia.api.url:https://api.properia.pt}") String apiBaseUrl) {
         this.props = props;
         this.jdbc = jdbc;
         this.json = json;
+        this.apiBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl.substring(0, apiBaseUrl.length() - 1) : apiBaseUrl;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .build();
@@ -108,13 +112,19 @@ public class VisionService {
             .list();
 
         // OpenAI Vision requires fully-qualified public HTTPS URLs.
-        // Filter out relative/local paths (e.g. /api/local-storage/media/...) that OpenAI cannot fetch.
+        // Relative paths (e.g. /api/local-storage/media/...) are served by this API — prefix with apiBaseUrl.
         var publicUrls = all.stream()
-            .filter(url -> url != null && (url.startsWith("https://") || url.startsWith("http://")))
+            .filter(url -> url != null && !url.isBlank())
+            .map(url -> {
+                if (url.startsWith("https://") || url.startsWith("http://")) return url;
+                if (url.startsWith("/")) return apiBaseUrl + url;
+                return null;
+            })
+            .filter(url -> url != null)
             .toList();
 
         if (!all.isEmpty() && publicUrls.isEmpty()) {
-            log.warn("Listing {} has {} images but none with public HTTP URLs (all relative paths). Vision analysis requires a public CDN.", listingId, all.size());
+            log.warn("Listing {} has {} images but none could be resolved to a public URL.", listingId, all.size());
             throw new DomainException("NO_PUBLIC_MEDIA",
                 "As imagens deste anúncio não são acessíveis publicamente. A análise IA requer imagens com URL pública (HTTPS).", 422);
         }
