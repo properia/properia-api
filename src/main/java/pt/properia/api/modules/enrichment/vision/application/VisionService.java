@@ -129,10 +129,7 @@ public class VisionService {
     }
 
     private String resolveImageForVision(String url) {
-        // CDN / external HTTPS URL — pass directly to OpenAI
-        if (url.startsWith("https://") || url.startsWith("http://")) return url;
-
-        // Local storage path: /api/local-storage/media/<objectKey>
+        // Local storage: read directly from disk
         if (url.startsWith("/api/local-storage/media/")) {
             var objectKey = url.substring("/api/local-storage/media/".length());
             var path = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads", objectKey).normalize();
@@ -141,19 +138,47 @@ public class VisionService {
                     log.warn("Local media file not found on disk: {}", path);
                     return null;
                 }
-                var bytes = Files.readAllBytes(path);
-                var contentType = Files.probeContentType(path);
-                if (contentType == null || !contentType.startsWith("image/")) contentType = "image/jpeg";
-                var b64 = Base64.getEncoder().encodeToString(bytes);
-                return "data:" + contentType + ";base64," + b64;
+                return encodeFileAsBase64(Files.readAllBytes(path), Files.probeContentType(path));
             } catch (Exception e) {
                 log.warn("Could not read local media file {}: {}", path, e.getMessage());
                 return null;
             }
         }
 
+        // CDN / external URL: fetch bytes server-side and send as base64.
+        // This avoids relying on the CDN being publicly accessible from OpenAI's servers
+        // (e.g. R2 bucket without public access configured would return 403 to OpenAI → 400).
+        if (url.startsWith("https://") || url.startsWith("http://")) {
+            try {
+                var request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent", "Properia-VisionService/1.0")
+                    .timeout(Duration.ofSeconds(15))
+                    .GET()
+                    .build();
+                var response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                if (response.statusCode() != 200) {
+                    log.warn("Could not fetch image from CDN URL {} — status {}", url, response.statusCode());
+                    return null;
+                }
+                var ct = response.headers().firstValue("Content-Type").orElse(null);
+                return encodeFileAsBase64(response.body(), ct);
+            } catch (Exception e) {
+                log.warn("Could not fetch image from URL {}: {}", url, e.getMessage());
+                return null;
+            }
+        }
+
         log.warn("Unrecognised media URL format, skipping: {}", url);
         return null;
+    }
+
+    private static String encodeFileAsBase64(byte[] bytes, String contentType) {
+        if (bytes == null || bytes.length == 0) return null;
+        if (contentType == null || !contentType.startsWith("image/")) contentType = "image/jpeg";
+        // Strip charset or other params (e.g. "image/jpeg; charset=..." → "image/jpeg")
+        var mimeType = contentType.split(";")[0].trim();
+        return "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(bytes);
     }
 
     @SuppressWarnings("unchecked")
@@ -189,12 +214,21 @@ public class VisionService {
                 .timeout(Duration.ofMillis(props.getVisionTimeoutMs()))
                 .build();
 
-            log.info("OpenAI vision request: model={} images={} urls={}", props.getVisionModel(), imageUrls.size(), imageUrls);
+            log.info("OpenAI vision request: model={} images={}", props.getVisionModel(), imageUrls.size());
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
-                log.error("OpenAI vision error {}: {}", response.statusCode(), response.body());
+                var errorBody = response.body();
+                log.error("OpenAI vision error {}: {}", response.statusCode(), errorBody);
+                // Extract OpenAI error message for a more useful user-facing message
+                String openAiMsg = null;
+                try {
+                    openAiMsg = json.readTree(errorBody).path("error").path("message").asText(null);
+                } catch (Exception ignored) {}
+                var detail = openAiMsg != null && !openAiMsg.isBlank()
+                    ? openAiMsg
+                    : "status " + response.statusCode();
                 throw new DomainException("VISION_API_ERROR",
-                    "Erro na API de visão IA (status " + response.statusCode() + "). Tenta novamente.", 503);
+                    "Erro na API de visão IA: " + detail, 503);
             }
 
             var responseNode = json.readTree(response.body());
