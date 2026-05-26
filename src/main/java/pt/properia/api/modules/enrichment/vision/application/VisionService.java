@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.modules.enrichment.vision.infrastructure.OpenAIProperties;
@@ -14,9 +13,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.Base64;
 
 @Service
 public class VisionService {
@@ -62,14 +64,11 @@ public class VisionService {
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final HttpClient http;
-    private final String apiBaseUrl;
 
-    public VisionService(OpenAIProperties props, JdbcClient jdbc, ObjectMapper json,
-                         @Value("${properia.api.url:https://api.properia.pt}") String apiBaseUrl) {
+    public VisionService(OpenAIProperties props, JdbcClient jdbc, ObjectMapper json) {
         this.props = props;
         this.jdbc = jdbc;
         this.json = json;
-        this.apiBaseUrl = apiBaseUrl.endsWith("/") ? apiBaseUrl.substring(0, apiBaseUrl.length() - 1) : apiBaseUrl;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .build();
@@ -111,25 +110,50 @@ public class VisionService {
             .query((rs, n) -> rs.getString("url"))
             .list();
 
-        // OpenAI Vision requires fully-qualified public HTTPS URLs.
-        // Relative paths (e.g. /api/local-storage/media/...) are served by this API — prefix with apiBaseUrl.
-        var publicUrls = all.stream()
+        // OpenAI Vision accepts either public HTTPS URLs or base64 data URIs.
+        // For local storage paths we read from disk and encode — avoids needing the API
+        // to be publicly reachable and works even if the /tmp files are still warm.
+        var resolved = all.stream()
             .filter(url -> url != null && !url.isBlank())
-            .map(url -> {
-                if (url.startsWith("https://") || url.startsWith("http://")) return url;
-                if (url.startsWith("/")) return apiBaseUrl + url;
-                return null;
-            })
-            .filter(url -> url != null)
+            .map(this::resolveImageForVision)
+            .filter(Objects::nonNull)
             .toList();
 
-        if (!all.isEmpty() && publicUrls.isEmpty()) {
-            log.warn("Listing {} has {} images but none could be resolved to a public URL.", listingId, all.size());
+        if (!all.isEmpty() && resolved.isEmpty()) {
+            log.warn("Listing {} has {} images but none could be resolved for Vision analysis.", listingId, all.size());
             throw new DomainException("NO_PUBLIC_MEDIA",
-                "As imagens deste anúncio não são acessíveis publicamente. A análise IA requer imagens com URL pública (HTTPS).", 422);
+                "As imagens deste anúncio não são acessíveis. Verifica se as fotos foram guardadas corretamente.", 422);
         }
 
-        return publicUrls;
+        return resolved;
+    }
+
+    private String resolveImageForVision(String url) {
+        // CDN / external HTTPS URL — pass directly to OpenAI
+        if (url.startsWith("https://") || url.startsWith("http://")) return url;
+
+        // Local storage path: /api/local-storage/media/<objectKey>
+        if (url.startsWith("/api/local-storage/media/")) {
+            var objectKey = url.substring("/api/local-storage/media/".length());
+            var path = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads", objectKey).normalize();
+            try {
+                if (!Files.exists(path)) {
+                    log.warn("Local media file not found on disk: {}", path);
+                    return null;
+                }
+                var bytes = Files.readAllBytes(path);
+                var contentType = Files.probeContentType(path);
+                if (contentType == null || !contentType.startsWith("image/")) contentType = "image/jpeg";
+                var b64 = Base64.getEncoder().encodeToString(bytes);
+                return "data:" + contentType + ";base64," + b64;
+            } catch (Exception e) {
+                log.warn("Could not read local media file {}: {}", path, e.getMessage());
+                return null;
+            }
+        }
+
+        log.warn("Unrecognised media URL format, skipping: {}", url);
+        return null;
     }
 
     @SuppressWarnings("unchecked")

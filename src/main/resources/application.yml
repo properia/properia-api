@@ -166,8 +166,6 @@ properia:
 
   app:
     url: ${APP_URL:https://properia.pt}
-  api:
-    url: ${API_BASE_URL:https://api.properia.pt}
 
   oauth:
     issuer-url: ${AUTH_ISSUER_URL:https://accounts.google.com}
