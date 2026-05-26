@@ -1,13 +1,19 @@
 package pt.properia.api.modules.advertiser.interfaces;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import pt.properia.api.modules.media.infrastructure.R2UploadService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 /**
@@ -20,10 +26,14 @@ public class AdvertiserMiscController {
 
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
+    private final R2UploadService r2;
+    private final Path localStorageDir;
 
-    public AdvertiserMiscController(JdbcClient jdbc, ObjectMapper objectMapper) {
+    public AdvertiserMiscController(JdbcClient jdbc, ObjectMapper objectMapper, R2UploadService r2) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.r2 = r2;
+        this.localStorageDir = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads");
     }
 
     // ── Commercial settings ────────────────────────────────────────────────────
@@ -419,14 +429,42 @@ public class AdvertiserMiscController {
 
     // ── Profile logo ───────────────────────────────────────────────────────────
 
-    @PutMapping("/api/advertiser/profile/logo")
-    public ResponseEntity<?> updateLogo(@RequestBody Map<String, String> body,
+    @PostMapping(value = "/api/advertiser/profile/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadLogo(@RequestParam("file") MultipartFile file,
                                         @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        var logoUrl = body.get("logoUrl");
+        if (file.isEmpty()) throw new DomainException("BAD_REQUEST", "Ficheiro vazio.", 400);
+        var contentType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
+        if (!contentType.startsWith("image/")) {
+            throw new DomainException("BAD_REQUEST", "Apenas imagens são aceites (PNG, JPEG, WEBP, SVG).", 400);
+        }
+
+        String logoUrl;
+        try {
+            var ext = contentType.contains("png") ? ".png"
+                    : contentType.contains("svg") ? ".svg"
+                    : contentType.contains("webp") ? ".webp"
+                    : ".jpg";
+            var objectKey = "advertisers/" + advertiserId + "/logo-" + UUID.randomUUID() + ext;
+            if (r2.isConfigured()) {
+                logoUrl = r2.uploadBytes(objectKey, file.getBytes(), contentType);
+            } else {
+                var target = localStorageDir.resolve(
+                    Paths.get(objectKey).normalize()).normalize();
+                Files.createDirectories(target.getParent());
+                file.transferTo(target);
+                logoUrl = "/api/local-storage/media/" + objectKey;
+            }
+        } catch (Exception e) {
+            throw new DomainException("UPLOAD_ERROR", "Erro ao guardar o logo: " + e.getMessage(), 500);
+        }
+
         jdbc.sql("UPDATE properia.advertisers SET logo_url = :url, updated_at = now() WHERE id = :id")
             .param("url", logoUrl).param("id", advertiserId).update();
-        return ResponseEntity.ok(Map.of("data", Map.of("logoUrl", logoUrl != null ? logoUrl : "")));
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("logoUrl", logoUrl);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @DeleteMapping("/api/advertiser/profile/logo")
@@ -434,7 +472,7 @@ public class AdvertiserMiscController {
         var advertiserId = requireAdvertiserId(claims);
         jdbc.sql("UPDATE properia.advertisers SET logo_url = NULL, updated_at = now() WHERE id = :id")
             .param("id", advertiserId).update();
-        var logoData = new java.util.LinkedHashMap<String, Object>();
+        var logoData = new LinkedHashMap<String, Object>();
         logoData.put("logoUrl", null);
         return ResponseEntity.ok(Map.of("data", logoData));
     }
