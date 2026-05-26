@@ -2,6 +2,8 @@ package pt.properia.api.modules.enrichment.vision.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.modules.enrichment.vision.infrastructure.OpenAIProperties;
@@ -17,6 +19,8 @@ import java.util.*;
 
 @Service
 public class VisionService {
+
+    private static final Logger log = LoggerFactory.getLogger(VisionService.class);
 
     private static final String SYSTEM_PROMPT = """
         You are a real estate photography analyst.
@@ -92,7 +96,7 @@ public class VisionService {
     }
 
     private List<String> getListingImageUrls(UUID listingId) {
-        return jdbc.sql("""
+        var all = jdbc.sql("""
                 SELECT url FROM properia.listing_media
                 WHERE listing_id = :id AND media_type = 'image'
                 ORDER BY sort_order ASC
@@ -102,6 +106,20 @@ public class VisionService {
             .param("max", props.getVisionMaxImages())
             .query((rs, n) -> rs.getString("url"))
             .list();
+
+        // OpenAI Vision requires fully-qualified public HTTPS URLs.
+        // Filter out relative/local paths (e.g. /api/local-storage/media/...) that OpenAI cannot fetch.
+        var publicUrls = all.stream()
+            .filter(url -> url != null && (url.startsWith("https://") || url.startsWith("http://")))
+            .toList();
+
+        if (!all.isEmpty() && publicUrls.isEmpty()) {
+            log.warn("Listing {} has {} images but none with public HTTP URLs (all relative paths). Vision analysis requires a public CDN.", listingId, all.size());
+            throw new DomainException("NO_PUBLIC_MEDIA",
+                "As imagens deste anúncio não são acessíveis publicamente. A análise IA requer imagens com URL pública (HTTPS).", 422);
+        }
+
+        return publicUrls;
     }
 
     @SuppressWarnings("unchecked")
@@ -137,8 +155,10 @@ public class VisionService {
                 .timeout(Duration.ofMillis(props.getVisionTimeoutMs()))
                 .build();
 
+            log.info("OpenAI vision request: model={} images={} urls={}", props.getVisionModel(), imageUrls.size(), imageUrls);
             var response = http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
+                log.error("OpenAI vision error {}: {}", response.statusCode(), response.body());
                 throw new DomainException("VISION_API_ERROR",
                     "Erro na API de visão IA (status " + response.statusCode() + "). Tenta novamente.", 503);
             }
