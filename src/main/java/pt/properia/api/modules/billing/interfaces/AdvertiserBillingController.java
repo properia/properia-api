@@ -158,7 +158,9 @@ public class AdvertiserBillingController {
 
         var caps = capabilities(effectivePlanCode);
         int maxListings = (int) caps.get("maxListings");
+        int maxTeam = (int) caps.get("maxTeamMembers");
         boolean listingsLimitReached = maxListings != -1 && activeListings >= maxListings;
+        boolean teamLimitExceeded = maxTeam != -1 && teamMembers > maxTeam;
 
         var pilot = new LinkedHashMap<String, Object>();
         pilot.put("isActive", false);
@@ -175,7 +177,7 @@ public class AdvertiserBillingController {
         var limitsReached = Map.of(
             "listings", listingsLimitReached,
             "featuredListings", false,
-            "teamMembers", false,
+            "teamMembers", teamLimitExceeded,
             "onlineVisits", false
         );
         var upgrade = Map.of(
