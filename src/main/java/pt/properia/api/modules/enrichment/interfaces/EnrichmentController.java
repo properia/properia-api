@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.enrichment.vision.application.VisionService;
+import pt.properia.api.modules.zone.application.ZoneSnapshotService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -12,7 +13,7 @@ import java.util.*;
 
 /**
  * Handles enrichment endpoints for listing enrichment (zone, POIs, vision, matching).
- * Vision analysis is synchronous (OpenAI GPT-4 vision). Others queue async jobs.
+ * Vision analysis is synchronous (OpenAI GPT-4 vision). Zone runs processAsync directly.
  */
 @RestController
 @RequestMapping("/api/enrichment/listings/{id}")
@@ -20,19 +21,21 @@ public class EnrichmentController {
 
     private final JdbcClient jdbc;
     private final VisionService visionService;
+    private final ZoneSnapshotService zoneSnapshotService;
 
-    public EnrichmentController(JdbcClient jdbc, VisionService visionService) {
+    public EnrichmentController(JdbcClient jdbc, VisionService visionService,
+                                ZoneSnapshotService zoneSnapshotService) {
         this.jdbc = jdbc;
         this.visionService = visionService;
+        this.zoneSnapshotService = zoneSnapshotService;
     }
 
     // ── Zone enrichment ────────────────────────────────────────────────────────
 
     @GetMapping("/zone")
     public ResponseEntity<?> getZone(@PathVariable UUID id) {
-        var data = loadEnrichment(id, "zone");
         var resp = new LinkedHashMap<String, Object>();
-        resp.put("data", data);
+        resp.put("data", null);
         return ResponseEntity.ok(resp);
     }
 
@@ -40,24 +43,109 @@ public class EnrichmentController {
     public ResponseEntity<?> enqueueZone(@PathVariable UUID id,
                                          @AuthenticationPrincipal JwtClaims claims) {
         requireAdvertiserOwner(claims, id);
+
+        // Fetch listing coordinates and location data to trigger actual zone processing
+        var listing = jdbc.sql("""
+                SELECT l.latitude, l.longitude, l.city, l.neighborhood,
+                       loc.street, loc.location_precision
+                FROM properia.listings l
+                LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
+                WHERE l.id = :id
+                """)
+            .param("id", id)
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("latitude", rs.getObject("latitude"));
+                m.put("longitude", rs.getObject("longitude"));
+                m.put("city", rs.getString("city"));
+                m.put("neighborhood", rs.getString("neighborhood"));
+                m.put("street", rs.getString("street"));
+                m.put("precision", rs.getString("location_precision"));
+                return m;
+            })
+            .optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Imóvel não encontrado.", 404));
+
+        var lat = listing.get("latitude");
+        var lng = listing.get("longitude");
+
+        if (lat == null || lng == null) {
+            return ResponseEntity.unprocessableEntity()
+                .body(Map.of("data", Map.of("queued", false, "reason", "missing_coordinates")));
+        }
+
         enqueueJob(id, "listing_zone_enrichment");
-        return ResponseEntity.status(202).body(Map.of("data", Map.of("queued", true, "jobType", "listing_zone_enrichment")));
+
+        // Actually trigger the zone snapshot processing (was missing before)
+        zoneSnapshotService.processAsync(
+            id,
+            ((Number) lat).doubleValue(),
+            ((Number) lng).doubleValue(),
+            (String) listing.get("street"),
+            (String) listing.get("neighborhood"),
+            (String) listing.get("city"),
+            (String) listing.get("precision")
+        );
+
+        return ResponseEntity.status(202)
+            .body(Map.of("data", Map.of("queued", true, "jobType", "listing_zone_enrichment")));
     }
 
     @GetMapping("/zone/status")
     public ResponseEntity<?> zoneStatus(@PathVariable UUID id) {
-        var status = getJobStatus(id, "listing_zone_enrichment");
-        return ResponseEntity.ok(Map.of("data", Map.of("status", status)));
+        // Return full ListingPoiEnrichmentStatusResponse matching FE contract
+        var snapshot = jdbc.sql("""
+                SELECT status, processed_at, summary_short
+                FROM properia.listing_zone_snapshots
+                WHERE listing_id = :id
+                ORDER BY created_at DESC LIMIT 1
+                """)
+            .param("id", id)
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("status", rs.getString("status"));
+                var pAt = rs.getTimestamp("processed_at");
+                m.put("processedAt", pAt != null ? pAt.toInstant().toString() : null);
+                return m;
+            })
+            .optional().orElse(null);
+
+        var latestJob = jdbc.sql("""
+                SELECT id, status, created_at, updated_at, error_message
+                FROM properia.job_executions
+                WHERE entity_id = :id AND job_type = 'listing_zone_enrichment'
+                ORDER BY created_at DESC LIMIT 1
+                """)
+            .param("id", id)
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("id", rs.getString("id"));
+                m.put("status", rs.getString("status"));
+                var cAt = rs.getTimestamp("created_at");
+                m.put("createdAt", cAt != null ? cAt.toInstant().toString() : null);
+                var uAt = rs.getTimestamp("updated_at");
+                m.put("completedAt", uAt != null ? uAt.toInstant().toString() : null);
+                m.put("errorMessage", rs.getString("error_message"));
+                return (Object) m;
+            })
+            .optional().orElse(null);
+
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("listingId", id.toString());
+        resp.put("hasPoiSummary", snapshot != null && "processed".equals(snapshot.get("status")));
+        resp.put("hasZoneContext", snapshot != null && "processed".equals(snapshot.get("status")));
+        resp.put("zoneProcessingStatus", snapshot != null ? snapshot.get("status") : "not_processed");
+        resp.put("zoneProcessedAt", snapshot != null ? snapshot.get("processedAt") : null);
+        resp.put("latestJob", latestJob);
+
+        return ResponseEntity.ok(Map.of("data", resp));
     }
 
     // ── POIs enrichment ────────────────────────────────────────────────────────
 
     @GetMapping("/pois")
     public ResponseEntity<?> getPois(@PathVariable UUID id) {
-        var data = loadEnrichment(id, "pois");
-        var resp = new LinkedHashMap<String, Object>();
-        resp.put("data", data);
-        return ResponseEntity.ok(resp);
+        return ResponseEntity.ok(Map.of("data", null));
     }
 
     @PostMapping("/pois")
@@ -179,11 +267,6 @@ public class EnrichmentController {
                 m.put("photoRankings", List.of());
                 return (Object) m;
             }).optional().orElse(null);
-    }
-
-    private Object loadEnrichment(UUID listingId, String type) {
-        // Only zone/pois types — return empty for unknown types
-        return null;
     }
 
     private List<String> parseJsonArray(String json) {
