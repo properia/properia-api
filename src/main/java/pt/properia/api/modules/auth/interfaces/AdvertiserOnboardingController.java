@@ -192,9 +192,11 @@ public class AdvertiserOnboardingController {
             .param("adv", id).param("uid", claims.userId())
             .param("type", advertiserType).update();
 
-        // Auto-activate 90-day business trial for agencies
+        // Agencies get a 14-day Business trial; all others get 3 welcome credits
         if ("agency".equals(advertiserType)) {
             try { billingService.activateTrial(id); } catch (Exception ignored) {}
+        } else {
+            try { billingService.grantWelcomeCredits(id, 3); } catch (Exception ignored) {}
         }
 
         var result = loadOnboarding(claims.userId());

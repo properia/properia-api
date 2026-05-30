@@ -31,6 +31,15 @@ public class BillingService {
 
     public record CheckoutResult(String url) {}
 
+    public CheckoutResult createCreditCheckout(UUID advertiserId, String packCode, String returnUrl) {
+        if (stripeProps.isFake()) {
+            return new CheckoutResult(returnUrl + "?checkout=fake&credits=" + packCode);
+        }
+        // TODO: wire Stripe Payment Link or one-time Price ID per pack when going live
+        throw new pt.properia.api.shared.domain.DomainException(
+            "NOT_IMPLEMENTED", "Compra de créditos via Stripe ainda não configurada.", 501);
+    }
+
     public CheckoutResult createCheckout(UUID advertiserId, String planCode, String billingCycle, String returnUrl) {
         if (stripeProps.isFake()) {
             return new CheckoutResult(returnUrl + "?checkout=fake&plan=" + planCode);
@@ -116,7 +125,7 @@ public class BillingService {
             throw new DomainException("CONFLICT", "Trial já foi ativado para este anunciante.");
         }
         var now = java.time.Instant.now();
-        var endsAt = now.plus(90, java.time.temporal.ChronoUnit.DAYS);
+        var endsAt = now.plus(14, java.time.temporal.ChronoUnit.DAYS);
         billingRepo.updatePlanCode(advertiserId, "business");
         billingRepo.patchBillingMetadata(advertiserId, Map.of(
             "trialActivatedAt", now.toString(),
@@ -130,6 +139,14 @@ public class BillingService {
 
     public int getCreditBalance(UUID advertiserId) {
         return billingRepo.getCreditBalance(advertiserId);
+    }
+
+    public void grantWelcomeCredits(UUID advertiserId, int amount) {
+        var current = billingRepo.getCreditBalance(advertiserId);
+        var after = current + amount;
+        billingRepo.addCreditTransaction(advertiserId, "bonus", amount, after, null,
+            "Créditos de boas-vindas — bem-vindo à Properia!");
+        billingRepo.patchBillingMetadata(advertiserId, Map.of("creditBalance", after));
     }
 
     // ── Plan info ─────────────────────────────────────────────────────────────

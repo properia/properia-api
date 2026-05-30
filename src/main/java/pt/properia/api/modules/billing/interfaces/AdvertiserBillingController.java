@@ -32,7 +32,7 @@ public class AdvertiserBillingController {
             @RequestBody CheckoutRequest body,
             @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        var result = billingService.createCheckout(advertiserId, body.planCode(), body.billingCycle(), body.returnUrl());
+        var result = billingService.createCheckout(advertiserId, body.targetPlanCode(), body.billingCycle(), body.returnUrl());
         return ResponseEntity.ok(Map.of("data", Map.of("url", result.url())));
     }
 
@@ -45,11 +45,57 @@ public class AdvertiserBillingController {
         return ResponseEntity.ok(Map.of("data", Map.of("url", result.url())));
     }
 
+    // Credit pack sizes (credits, price in €)
+    private static final Map<String, int[]> CREDIT_PACKS = Map.of(
+        "basic",        new int[]{5,  15},
+        "standard",     new int[]{15, 39},
+        "professional", new int[]{40, 89}
+    );
+
+    @PostMapping("/api/advertiser/billing/credits")
+    public ResponseEntity<?> purchaseCredits(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        var packCode = body.getOrDefault("packCode", "basic").toString();
+        var returnUrl = body.getOrDefault("returnUrl", "/anunciante/plano").toString();
+
+        if (!CREDIT_PACKS.containsKey(packCode)) {
+            throw new DomainException("BAD_REQUEST", "Pack de créditos inválido.", 400);
+        }
+
+        var result = billingService.createCreditCheckout(advertiserId, packCode, returnUrl);
+        return ResponseEntity.ok(Map.of("data", Map.of("url", result.url())));
+    }
+
     @GetMapping("/api/advertiser/billing/credits")
     public ResponseEntity<?> getCredits(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
         var balance = billingService.getCreditBalance(advertiserId);
-        return ResponseEntity.ok(Map.of("data", Map.of("balance", balance)));
+        var transactions = jdbc.sql("""
+                SELECT id::text, type, amount, balance_after, description, created_at
+                FROM properia.advertiser_credit_transactions
+                WHERE advertiser_id = :adv
+                ORDER BY created_at DESC
+                LIMIT 50
+                """)
+            .param("adv", advertiserId)
+            .query((rs, n) -> {
+                var row = new LinkedHashMap<String, Object>();
+                row.put("id", rs.getString("id"));
+                row.put("type", rs.getString("type"));
+                row.put("amount", rs.getInt("amount"));
+                row.put("balanceAfter", rs.getInt("balance_after"));
+                row.put("description", rs.getString("description"));
+                var ts = rs.getTimestamp("created_at");
+                row.put("createdAt", ts != null ? ts.toInstant().toString() : null);
+                return row;
+            })
+            .list();
+        var data = new LinkedHashMap<String, Object>();
+        data.put("balance", balance);
+        data.put("transactions", transactions);
+        return ResponseEntity.ok(Map.of("data", data));
     }
 
     @GetMapping("/api/advertiser/plan")
@@ -76,7 +122,7 @@ public class AdvertiserBillingController {
         if (info.trialActivatedAt() != null) {
             try {
                 var activatedAt = Instant.parse(info.trialActivatedAt());
-                var endsAt = activatedAt.plus(90, ChronoUnit.DAYS);
+                var endsAt = activatedAt.plus(14, ChronoUnit.DAYS);
                 var now = Instant.now();
                 if (now.isBefore(endsAt)) {
                     long days = ChronoUnit.DAYS.between(now, endsAt);
@@ -86,7 +132,7 @@ public class AdvertiserBillingController {
                     trial.put("endsAt", endsAt.toString());
                     trial.put("trialPlanCode", "business");
                     trial.put("daysRemaining", (int) days);
-                    trial.put("isExpiringSoon", days <= 14);
+                    trial.put("isExpiringSoon", days <= 3);
                     effectivePlanCode = "business";
                 } else {
                     trialExpired = true;
@@ -165,8 +211,8 @@ public class AdvertiserBillingController {
         boolean isPro = "pro".equals(planCode) || "business".equals(planCode) || "pilot".equals(planCode);
         boolean isBusiness = "business".equals(planCode);
         var caps = new LinkedHashMap<String, Object>();
-        caps.put("maxListings", isBusiness ? -1 : isPro ? 15 : 3);
-        caps.put("maxFeaturedListings", isBusiness ? 5 : isPro ? 2 : 0);
+        caps.put("maxListings", isBusiness ? -1 : isPro ? 15 : 5);
+        caps.put("maxFeaturedListings", isBusiness ? 10 : isPro ? 3 : 0);
         caps.put("featuredPlacement", isPro);
         caps.put("aiEnrichment", isPro);
         caps.put("crm", isPro);
@@ -176,7 +222,7 @@ public class AdvertiserBillingController {
         caps.put("maxTeamMembers", isBusiness ? -1 : isPro ? 5 : 1);
         caps.put("analytics", isPro);
         caps.put("analyticsExport", isBusiness);
-        caps.put("maxOnlineVisitsPerMonth", isBusiness ? -1 : isPro ? 30 : 5);
+        caps.put("maxOnlineVisitsPerMonth", isBusiness ? -1 : isPro ? 20 : 5);
         caps.put("apiAccess", isBusiness);
         caps.put("crmIntegration", isBusiness);
         caps.put("partialBranding", isPro);
