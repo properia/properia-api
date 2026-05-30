@@ -228,9 +228,14 @@ public class JdbcSearchRepository implements SearchRepository {
         // Feature flags (has_elevator, has_pool, etc.)
         if (p.features() != null) {
             for (var feature : p.features()) {
-                var col = mapFeatureToColumn(feature);
-                if (col != null) {
-                    parts.add("l." + col + " = true");
+                if ("pet_friendly".equals(feature)) {
+                    // Stored in listing_features.feature_flags JSONB, not a boolean column
+                    parts.add("EXISTS (SELECT 1 FROM properia.listing_features lf2 WHERE lf2.listing_id = l.id AND lf2.feature_flags::jsonb->>'pet_friendly' = 'true')");
+                } else {
+                    var col = mapFeatureToColumn(feature);
+                    if (col != null) {
+                        parts.add("l." + col + " = true");
+                    }
                 }
             }
         }
@@ -399,6 +404,7 @@ public class JdbcSearchRepository implements SearchRepository {
         return switch (negocio) {
             case "venda" -> "sale";
             case "arrendamento" -> "rent";
+            case "trespasse" -> "transfer";
             default -> null;
         };
     }
