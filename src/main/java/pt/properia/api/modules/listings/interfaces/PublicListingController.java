@@ -423,9 +423,9 @@ public class PublicListingController {
     @GetMapping("/{id}/media")
     public ResponseEntity<?> getMedia(@PathVariable UUID id) {
         var media = jdbc.sql("""
-                SELECT id, listing_id, url, thumbnail_url, media_type, display_order,
-                       file_name, file_size, width, height, is_hero, created_at
-                FROM properia.listing_media WHERE listing_id = :id ORDER BY display_order ASC
+                SELECT id, listing_id, url, thumbnail_url, media_type, sort_order,
+                       file_name, width, height, is_cover, created_at
+                FROM properia.listing_media WHERE listing_id = :id ORDER BY is_cover DESC, sort_order ASC
                 """).param("id", id)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
@@ -434,12 +434,11 @@ public class PublicListingController {
                 m.put("url", rs.getString("url"));
                 m.put("thumbnailUrl", rs.getString("thumbnail_url"));
                 m.put("mediaType", rs.getString("media_type"));
-                m.put("displayOrder", rs.getInt("display_order"));
+                m.put("sortOrder", rs.getInt("sort_order"));
                 m.put("fileName", rs.getString("file_name"));
-                m.put("fileSize", rs.getObject("file_size"));
                 m.put("width", rs.getObject("width"));
                 m.put("height", rs.getObject("height"));
-                m.put("isHero", rs.getBoolean("is_hero"));
+                m.put("isCover", rs.getBoolean("is_cover"));
                 m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
                 return (Map<String, Object>) m;
             }).list();

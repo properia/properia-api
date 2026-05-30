@@ -239,7 +239,7 @@ public class EnrichmentController {
                 SELECT status FROM properia.job_executions
                 WHERE entity_id = :id AND job_type = :type
                 ORDER BY created_at DESC LIMIT 1
-                """).param("id", listingId.toString()).param("type", jobType)
+                """).param("id", listingId).param("type", jobType)
             .query((rs, n) -> rs.getString("status"))
             .optional().orElse("not_started");
     }
