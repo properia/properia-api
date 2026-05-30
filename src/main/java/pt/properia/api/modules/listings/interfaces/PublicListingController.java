@@ -173,8 +173,8 @@ public class PublicListingController {
         long total = 0;
         try {
             var inserted = jdbc.sql("""
-                    INSERT INTO properia.listing_detail_views (listing_id, user_id, session_key, viewed_at)
-                    VALUES (:lid, :uid, :key, now())
+                    INSERT INTO properia.listing_detail_views (listing_id, user_id, session_key, created_at, updated_at)
+                    VALUES (:lid, :uid, :key, now(), now())
                     ON CONFLICT (listing_id, session_key) DO NOTHING
                     """)
                 .param("lid", id).param("uid", userId).param("key", sessionKey)
