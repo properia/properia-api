@@ -123,9 +123,12 @@ public class BuyerChatController {
             @RequestBody Map<String, String> body) {
         requireAuth(claims);
         var listingId = UUID.fromString(body.get("listingId"));
-        var initialMessage = body.get("message");
+        var initialMessage = body.get("initialMessage");
         var conv = chatService.getOrCreateConversation(listingId, claims.userId(), initialMessage);
-        return ResponseEntity.ok(Map.of("data", conv));
+        return ResponseEntity.ok(Map.of("data", Map.of(
+            "conversationId", conv.id().toString(),
+            "leadId", conv.leadId() != null ? (Object) conv.leadId().toString() : null
+        )));
     }
 
     @PostMapping("/messages")
@@ -139,7 +142,7 @@ public class BuyerChatController {
             throw new DomainException("VALIDATION_ERROR", "A mensagem não pode estar vazia.");
         }
         var msg = chatService.sendBuyerMessage(conversationId, claims.userId(), message);
-        return ResponseEntity.ok(Map.of("data", msg));
+        return ResponseEntity.ok(Map.of("data", Map.of("message", msg)));
     }
 
     @PostMapping("/conversations/{id}/read")
