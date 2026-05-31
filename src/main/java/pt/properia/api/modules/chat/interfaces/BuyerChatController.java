@@ -125,10 +125,10 @@ public class BuyerChatController {
         var listingId = UUID.fromString(body.get("listingId"));
         var initialMessage = body.get("initialMessage");
         var conv = chatService.getOrCreateConversation(listingId, claims.userId(), initialMessage);
-        return ResponseEntity.ok(Map.of("data", Map.of(
-            "conversationId", conv.id().toString(),
-            "leadId", conv.leadId() != null ? (Object) conv.leadId().toString() : null
-        )));
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("conversationId", conv.id().toString());
+        result.put("leadId", conv.leadId() != null ? conv.leadId().toString() : null);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @PostMapping("/messages")
