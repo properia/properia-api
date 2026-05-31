@@ -23,6 +23,8 @@ public record ListingCardDto(
     String district,
     String parish,
     String neighborhood,
+    String street,
+    String postalCode,
     String heroImageUrl,
     String energyRating,
     String conditionStatus,
