@@ -7,6 +7,7 @@ import java.util.UUID;
 public record ListingCardDto(
     UUID id,
     String publicId,
+    UUID advertiserId,
     String status,
     String businessType,
     String propertyType,
@@ -24,6 +25,12 @@ public record ListingCardDto(
     String neighborhood,
     String heroImageUrl,
     String energyRating,
+    String conditionStatus,
+    String furnishedStatus,
+    Double latitude,
+    Double longitude,
+    String zoneLabelPrimary,
+    String zoneSummaryShort,
     Instant publishedAt,
     Instant firstPublishedAt,
     Instant createdAt

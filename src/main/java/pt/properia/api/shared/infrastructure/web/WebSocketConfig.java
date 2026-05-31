@@ -33,7 +33,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 "https://*.properia.pt",
                 "https://properia.pt",
                 "https://*.pages.dev"
-            )
-            .withSockJS();
+            );
     }
 }

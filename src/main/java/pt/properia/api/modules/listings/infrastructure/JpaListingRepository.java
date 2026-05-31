@@ -63,11 +63,60 @@ public class JpaListingRepository implements ListingRepository {
 
     @Override
     public List<ListingCardDto> findByAdvertiserId(UUID advertiserId) {
-        return listings.findAll().stream()
-            .filter(l -> advertiserId.equals(l.getAdvertiserId()))
-            .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
-            .map(this::toCardDto)
-            .toList();
+        return jdbc.sql("""
+                SELECT l.id, l.public_id, l.advertiser_id, l.status::text, l.business_type::text,
+                       l.property_type::text, l.title, l.price_amount, l.price_currency,
+                       l.bedrooms, l.bathrooms, l.suites, l.usable_area_m2, l.gross_area_m2,
+                       l.city, l.district, l.parish, l.neighborhood, l.hero_image_url, l.energy_rating,
+                       l.condition_declared::text, l.furnished_declared::text,
+                       COALESCE(l.latitude, loc.latitude)   AS latitude,
+                       COALESCE(l.longitude, loc.longitude) AS longitude,
+                       zs.zone_label_primary, zs.zone_summary_short,
+                       l.published_at, l.first_published_at, l.created_at
+                FROM properia.listings l
+                LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
+                LEFT JOIN properia.listing_zone_scores zs  ON zs.listing_id  = l.id
+                WHERE l.advertiser_id = :adv
+                  AND l.status::text != 'archived'
+                ORDER BY l.created_at DESC
+                """)
+            .param("adv", advertiserId)
+            .query((rs, n) -> new ListingCardDto(
+                rs.getObject("id", java.util.UUID.class),
+                rs.getString("public_id"),
+                rs.getObject("advertiser_id", java.util.UUID.class),
+                rs.getString("status"),
+                rs.getString("business_type"),
+                rs.getString("property_type"),
+                rs.getString("title"),
+                rs.getBigDecimal("price_amount"),
+                rs.getString("price_currency"),
+                rs.getInt("bedrooms"),
+                rs.getBigDecimal("bathrooms"),
+                rs.getInt("suites"),
+                rs.getBigDecimal("usable_area_m2"),
+                rs.getBigDecimal("gross_area_m2"),
+                rs.getString("city"),
+                rs.getString("district"),
+                rs.getString("parish"),
+                rs.getString("neighborhood"),
+                rs.getString("hero_image_url"),
+                rs.getString("energy_rating"),
+                rs.getString("condition_declared"),
+                rs.getString("furnished_declared"),
+                rs.getObject("latitude") != null ? rs.getDouble("latitude") : null,
+                rs.getObject("longitude") != null ? rs.getDouble("longitude") : null,
+                rs.getString("zone_label_primary"),
+                rs.getString("zone_summary_short"),
+                toInstant(rs.getTimestamp("published_at")),
+                toInstant(rs.getTimestamp("first_published_at")),
+                toInstant(rs.getTimestamp("created_at"))
+            ))
+            .list();
+    }
+
+    private static java.time.Instant toInstant(java.sql.Timestamp ts) {
+        return ts != null ? ts.toInstant() : null;
     }
 
     @Override
@@ -144,13 +193,16 @@ public class JpaListingRepository implements ListingRepository {
 
     private ListingCardDto toCardDto(Listing l) {
         return new ListingCardDto(
-            l.getId(), l.getPublicId(), l.getStatus(),
+            l.getId(), l.getPublicId(), l.getAdvertiserId(), l.getStatus(),
             l.getBusinessType(), l.getPropertyType(), l.getTitle(),
             l.getPriceAmount(), l.getPriceCurrency(),
             l.getBedrooms(), l.getBathrooms(), l.getSuites(),
             l.getUsableAreaM2(), l.getGrossAreaM2(),
             l.getCity(), l.getDistrict(), l.getParish(), l.getNeighborhood(),
             l.getHeroImageUrl(), l.getEnergyRating(),
+            l.getConditionDeclared(), l.getFurnishedDeclared(),
+            l.getLatitude(), l.getLongitude(),
+            null, null,
             l.getPublishedAt(), l.getFirstPublishedAt(), l.getCreatedAt()
         );
     }
