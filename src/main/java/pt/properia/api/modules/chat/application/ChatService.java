@@ -22,14 +22,17 @@ public class ChatService {
     private final ChatConversationJpaRepository conversationRepo;
     private final ChatMessageJpaRepository messageRepo;
     private final ListingJpaRepository listingRepo;
+    private final ChatEventPublisher eventPublisher;
 
     public ChatService(
             ChatConversationJpaRepository conversationRepo,
             ChatMessageJpaRepository messageRepo,
-            ListingJpaRepository listingRepo) {
+            ListingJpaRepository listingRepo,
+            ChatEventPublisher eventPublisher) {
         this.conversationRepo = conversationRepo;
         this.messageRepo = messageRepo;
         this.listingRepo = listingRepo;
+        this.eventPublisher = eventPublisher;
     }
 
     // ── Advertiser side ────────────────────────────────────────────────────────
@@ -59,7 +62,9 @@ public class ChatService {
         var saved = messageRepo.save(message);
 
         updateConversationPreview(conv, body);
-        return toMessageDto(saved);
+        var dto = toMessageDto(saved);
+        eventPublisher.publishNewMessage(conv.getId(), conv.getAdvertiserId(), conv.getBuyerUserId(), dto);
+        return dto;
     }
 
     public void closeConversation(UUID conversationId, UUID advertiserId) {
@@ -103,6 +108,7 @@ public class ChatService {
         if (initialMessage != null && !initialMessage.isBlank()) {
             var msg = buildMessage(savedConv, "buyer", buyerUserId, initialMessage);
             firstMessage = toMessageDto(messageRepo.save(msg));
+            eventPublisher.publishNewMessage(savedConv.getId(), savedConv.getAdvertiserId(), buyerUserId, firstMessage);
         }
 
         return toDto(savedConv, firstMessage != null ? List.of(firstMessage) : List.of());
@@ -120,7 +126,9 @@ public class ChatService {
         var message = buildMessage(conv, "buyer", buyerUserId, body);
         var saved = messageRepo.save(message);
         updateConversationPreview(conv, body);
-        return toMessageDto(saved);
+        var dto = toMessageDto(saved);
+        eventPublisher.publishNewMessage(conv.getId(), conv.getAdvertiserId(), conv.getBuyerUserId(), dto);
+        return dto;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

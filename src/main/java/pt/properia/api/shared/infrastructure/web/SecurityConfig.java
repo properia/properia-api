@@ -93,6 +93,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/visitas").permitAll()
                 .requestMatchers("/api/visitas/email-verification/**").permitAll()
 
+                // WebSocket endpoint (auth handled in handshake interceptor)
+                .requestMatchers("/ws/**").permitAll()
+
                 // Webhooks (verified by signature, not session)
                 .requestMatchers("/api/webhooks/**").permitAll()
 
@@ -151,6 +154,7 @@ public class SecurityConfig {
 
         var source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", config);
+        source.registerCorsConfiguration("/ws/**", config);
         return source;
     }
 }

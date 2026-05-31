@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.Map;
 
@@ -31,6 +32,11 @@ public class AuthEmailService {
             .defaultHeader("Authorization", "Bearer " + resendApiKey)
             .defaultHeader("Content-Type", "application/json")
             .build();
+        if (this.enabled) {
+            log.info("Email service enabled: from={} appUrl={}", from, appUrl);
+        } else {
+            log.warn("Email service DISABLED — RESEND_API_KEY not set. Emails will not be sent.");
+        }
     }
 
     public void sendEmailVerification(String to, String token) {
@@ -69,7 +75,7 @@ public class AuthEmailService {
 
     private void send(String to, String subject, String htmlBody, String textBody) {
         if (!enabled) {
-            log.info("Email not sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
+            log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
             return;
         }
         try {
@@ -84,17 +90,17 @@ public class AuthEmailService {
                 ))
                 .retrieve()
                 .onStatus(status -> !status.is2xxSuccessful(), resp ->
-                    resp.bodyToMono(String.class).doOnNext(body ->
-                        log.error("Resend API error {}: {}", resp.statusCode().value(), body)
-                    ).thenReturn(new RuntimeException("Resend error " + resp.statusCode().value()))
+                    resp.bodyToMono(String.class).flatMap(body -> {
+                        log.error("Resend API error {} sending to={} subject={}: {}", resp.statusCode().value(), to, subject, body);
+                        return Mono.error(new RuntimeException("Resend error " + resp.statusCode().value() + ": " + body));
+                    })
                 )
                 .toBodilessEntity()
-                .subscribe(
-                    ignored -> log.info("Email sent: to={} subject={}", to, subject),
-                    err -> log.error("Failed to send email to={} subject={}: {}", to, subject, err.getMessage())
-                );
+                .block(java.time.Duration.ofSeconds(10));
+            log.info("Email sent: to={} subject={}", to, subject);
         } catch (Exception e) {
-            log.error("Email send error to={} subject={}: {}", to, subject, e.getMessage());
+            log.error("Failed to send email to={} subject={}: {}", to, subject, e.getMessage());
+            throw new RuntimeException("Falha ao enviar email: " + e.getMessage(), e);
         }
     }
 

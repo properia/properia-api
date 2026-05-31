@@ -25,9 +25,9 @@ public class CreateListingUseCase {
         String title,
         String descriptionRaw,
         BigDecimal priceAmount,
-        int bedrooms,
+        Integer bedrooms,
         BigDecimal bathrooms,
-        int suites,
+        Integer suites,
         BigDecimal usableAreaM2,
         BigDecimal grossAreaM2,
         String city,
@@ -60,9 +60,9 @@ public class CreateListingUseCase {
         listing.setTitleNormalized(cmd.title().strip().toLowerCase());
         listing.setDescriptionRaw(cmd.descriptionRaw());
         listing.setPriceAmount(cmd.priceAmount());
-        listing.setBedrooms(cmd.bedrooms());
+        listing.setBedrooms(cmd.bedrooms() != null ? cmd.bedrooms() : 0);
         listing.setBathrooms(cmd.bathrooms() != null ? cmd.bathrooms() : BigDecimal.ZERO);
-        listing.setSuites(cmd.suites());
+        listing.setSuites(cmd.suites() != null ? cmd.suites() : 0);
         listing.setUsableAreaM2(cmd.usableAreaM2());
         listing.setGrossAreaM2(cmd.grossAreaM2());
         listing.setCity(cmd.city());
