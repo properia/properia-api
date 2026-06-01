@@ -56,14 +56,20 @@ public class PublicListingController {
             }
         }
 
-        // Enrich with advertiser trust data
+        // Enrich with advertiser trust data + publicContact (assigned agent/owner)
         var advertiserId = listingMap.get("advertiserId");
-        if (advertiserId != null) {
+        if (advertiserId != null && listingId != null) {
             try {
                 var trust = loadAdvertiserTrust(UUID.fromString(advertiserId.toString()));
                 listingMap.put("advertiserTrust", trust);
+                var contact = loadPublicContact(
+                    UUID.fromString(listingId.toString()),
+                    trust != null ? (String) trust.get("advertiserType") : null
+                );
+                listingMap.put("publicContact", contact);
             } catch (Exception e) {
                 listingMap.put("advertiserTrust", null);
+                listingMap.put("publicContact", null);
             }
         }
 
@@ -105,6 +111,34 @@ public class PublicListingController {
                 stats.put("totalListings", rs.getInt("total_listings"));
                 stats.put("avgRating", null);
                 m.put("responseStats", stats);
+                return m;
+            })
+            .optional()
+            .orElse(null);
+    }
+
+    private Map<String, Object> loadPublicContact(UUID listingId, String advertiserType) {
+        // Determine the kind of contact based on advertiser type
+        boolean isAgent = advertiserType != null &&
+            (advertiserType.equals("agency") || advertiserType.equals("consultant") ||
+             advertiserType.equals("developer") || advertiserType.equals("promoter"));
+        String kind = isAgent ? "agent" : "owner";
+
+        return jdbc.sql("""
+                SELECT u.full_name, u.avatar_url
+                FROM properia.listings li
+                JOIN properia.app_users u ON u.id = li.owner_user_id
+                WHERE li.id = :lid
+                """)
+            .param("lid", listingId)
+            .query((rs, n) -> {
+                var name = rs.getString("full_name");
+                var avatarUrl = rs.getString("avatar_url");
+                if (name == null || name.isBlank()) return null;
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("name", name);
+                m.put("avatarUrl", avatarUrl);
+                m.put("kind", kind);
                 return m;
             })
             .optional()
