@@ -56,7 +56,59 @@ public class PublicListingController {
             }
         }
 
+        // Enrich with advertiser trust data
+        var advertiserId = listingMap.get("advertiserId");
+        if (advertiserId != null) {
+            try {
+                var trust = loadAdvertiserTrust(UUID.fromString(advertiserId.toString()));
+                listingMap.put("advertiserTrust", trust);
+            } catch (Exception e) {
+                listingMap.put("advertiserTrust", null);
+            }
+        }
+
         return ResponseEntity.ok(Map.of("data", listingMap));
+    }
+
+    private Map<String, Object> loadAdvertiserTrust(UUID advertiserId) {
+        return jdbc.sql("""
+                SELECT a.id, a.brand_name, a.legal_name, a.advertiser_type,
+                       a.email, a.phone, a.logo_url, a.verification_status,
+                       a.license_number, a.professional_registration_verified_at,
+                       a.updated_at,
+                       (SELECT COUNT(*) FROM properia.listings l2
+                        WHERE l2.advertiser_id = a.id AND l2.status = 'published') AS total_listings
+                FROM properia.advertisers a
+                WHERE a.id = :id
+                """)
+            .param("id", advertiserId)
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("advertiserId", rs.getString("id"));
+                m.put("advertiserName",
+                    rs.getString("brand_name") != null ? rs.getString("brand_name") : rs.getString("legal_name"));
+                m.put("advertiserType", rs.getString("advertiser_type"));
+                m.put("logoUrl", rs.getString("logo_url"));
+                m.put("email", rs.getString("email"));
+                m.put("phone", rs.getString("phone"));
+                m.put("verificationStatus", rs.getString("verification_status"));
+                m.put("licenseNumber", rs.getString("license_number"));
+                m.put("professionalRegistrationVerifiedAt",
+                    rs.getTimestamp("professional_registration_verified_at") != null
+                        ? rs.getTimestamp("professional_registration_verified_at").toInstant().toString()
+                        : null);
+                m.put("updatedAt",
+                    rs.getTimestamp("updated_at") != null
+                        ? rs.getTimestamp("updated_at").toInstant().toString()
+                        : null);
+                var stats = new java.util.LinkedHashMap<String, Object>();
+                stats.put("totalListings", rs.getInt("total_listings"));
+                stats.put("avgRating", null);
+                m.put("responseStats", stats);
+                return m;
+            })
+            .optional()
+            .orElse(null);
     }
 
     private Map<String, Object> loadZoneSnapshot(UUID listingId) {
