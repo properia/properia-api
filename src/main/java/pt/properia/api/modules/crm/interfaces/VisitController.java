@@ -435,7 +435,7 @@ public class VisitController {
                         last_sent_at = :now, failed_attempts = 0, updated_at = :now
                     WHERE id = :id
                     """).param("hash", codeHash).param("exp", java.sql.Timestamp.from(expiresAt))
-                .param("now", java.sql.Timestamp.from(now)).param("id", existing.get().get("id")).update();
+                .param("now", java.sql.Timestamp.from(now)).param("id", UUID.fromString(existing.get().get("id").toString())).update();
         } else {
             jdbc.sql("""
                     INSERT INTO properia.visit_email_verifications
