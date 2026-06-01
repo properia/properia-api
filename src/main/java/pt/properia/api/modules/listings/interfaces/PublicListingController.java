@@ -122,7 +122,7 @@ public class PublicListingController {
         boolean isAgent = advertiserType != null &&
             (advertiserType.equals("agency") || advertiserType.equals("consultant") ||
              advertiserType.equals("developer") || advertiserType.equals("promoter"));
-        String kind = isAgent ? "agent" : "owner";
+        String kind = isAgent ? "agent" : "brand";
 
         return jdbc.sql("""
                 SELECT u.full_name, u.avatar_url
