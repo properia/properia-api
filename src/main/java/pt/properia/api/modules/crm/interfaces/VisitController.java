@@ -46,15 +46,88 @@ public class VisitController {
             @Valid @RequestBody RequestVisitRequest req) {
 
         requireAuth(claims);
+
+        var listingId = java.util.UUID.fromString(req.listingId());
+
+        // Get or create a lead for this buyer+listing
+        var existingLead = jdbc.sql("""
+                SELECT id FROM properia.leads
+                WHERE listing_id = :lid AND user_id = :uid
+                LIMIT 1
+                """).param("lid", listingId).param("uid", claims.userId())
+            .query((rs, n) -> rs.getString("id"))
+            .optional();
+
+        UUID leadId;
+        if (existingLead.isPresent()) {
+            leadId = UUID.fromString(existingLead.get());
+            // Update contact info
+            jdbc.sql("""
+                    UPDATE properia.leads
+                    SET contact_name = :name, contact_phone = :phone, updated_at = now()
+                    WHERE id = :id
+                    """).param("name", req.contactName())
+                .param("phone", req.contactPhone())
+                .param("id", leadId).update();
+        } else {
+            // Find advertiser from listing
+            var advertiserIdStr = jdbc.sql("""
+                    SELECT advertiser_id FROM properia.listings WHERE id = :lid
+                    """).param("lid", listingId)
+                .query((rs, n) -> rs.getString("advertiser_id"))
+                .optional()
+                .orElseThrow(() -> new pt.properia.api.shared.domain.DomainException("NOT_FOUND", "Anúncio não encontrado.", 404));
+
+            leadId = UUID.randomUUID();
+            var intentType = "rent".equals(req.mode()) ? "rent" : "buy";
+            jdbc.sql("""
+                    INSERT INTO properia.leads
+                      (id, listing_id, user_id, advertiser_id, source, stage, intent_type,
+                       message, contact_name, contact_email, contact_phone,
+                       metadata, created_at, updated_at)
+                    VALUES (:id, :lid, :uid, :adv::uuid, 'visit_request', 'new', :intent,
+                            :msg, :name, :email, :phone, '{}', now(), now())
+                    """)
+                .param("id", leadId)
+                .param("lid", listingId)
+                .param("uid", claims.userId())
+                .param("adv", advertiserIdStr)
+                .param("intent", intentType)
+                .param("msg", req.message())
+                .param("name", req.contactName())
+                .param("email", req.contactEmail())
+                .param("phone", req.contactPhone())
+                .update();
+        }
+
+        java.time.Instant startsAt = java.time.Instant.parse(req.slotStartsAt());
+        java.time.Instant endsAt = req.slotEndsAt() != null ? java.time.Instant.parse(req.slotEndsAt()) : null;
+
+        // Check if slot already booked (waitlist if so)
+        var alreadyBooked = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.visits
+                WHERE listing_id = :lid AND status IN ('requested','confirmed')
+                  AND starts_at = :starts
+                """).param("lid", listingId).param("starts", java.sql.Timestamp.from(startsAt))
+            .query(Long.class).single() > 0;
+
         var visit = requestVisit.execute(new RequestVisitUseCase.Command(
-            req.listingId(), claims.userId(), req.leadId(),
-            req.mode(), req.startsAt(), req.endsAt(), req.notes()
+            listingId, claims.userId(), leadId,
+            req.mode() != null ? req.mode() : "onsite",
+            startsAt, endsAt, req.message()
         ));
 
+        if (alreadyBooked) {
+            jdbc.sql("UPDATE properia.visits SET status = 'waitlist', updated_at = now() WHERE id = :id")
+                .param("id", visit.getId()).update();
+        }
+
+        String finalStatus = alreadyBooked ? "waitlist" : visit.getStatus();
+
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
-            "id", visit.getId(),
-            "status", visit.getStatus(),
-            "startsAt", visit.getStartsAt()
+            "leadId", leadId.toString(),
+            "visitId", visit.getId().toString(),
+            "status", finalStatus
         )));
     }
 

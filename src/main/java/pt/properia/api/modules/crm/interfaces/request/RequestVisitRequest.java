@@ -1,15 +1,18 @@
 package pt.properia.api.modules.crm.interfaces.request;
 
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
-import java.time.Instant;
-import java.util.UUID;
-
 public record RequestVisitRequest(
-    @NotNull UUID listingId,
-    UUID leadId,
+    @NotNull String listingId,
     String mode,
-    @NotNull Instant startsAt,
-    Instant endsAt,
-    String notes
+    @NotNull String slotStartsAt,
+    String slotEndsAt,
+    String selectedTimezone,
+    @NotBlank String contactName,
+    @NotBlank String contactEmail,
+    String contactPhone,
+    String message,
+    Boolean operationalConsent,
+    Boolean marketingConsent
 ) {}
