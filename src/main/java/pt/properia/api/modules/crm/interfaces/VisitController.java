@@ -79,20 +79,21 @@ public class VisitController {
                 .orElseThrow(() -> new pt.properia.api.shared.domain.DomainException("NOT_FOUND", "Anúncio não encontrado.", 404));
 
             leadId = UUID.randomUUID();
-            var intentType = "rent".equals(req.mode()) ? "rent" : "buy";
             jdbc.sql("""
                     INSERT INTO properia.leads
                       (id, listing_id, user_id, advertiser_id, source, stage, intent_type,
                        message, contact_name, contact_email, contact_phone,
                        metadata, created_at, updated_at)
-                    VALUES (:id, :lid, :uid, :adv::uuid, 'visit_request', 'new', :intent,
+                    VALUES (:id, :lid, :uid, :adv::uuid,
+                            'visit_request'::properia.lead_source,
+                            'new'::properia.lead_stage,
+                            'buy'::properia.intent_type,
                             :msg, :name, :email, :phone, '{}', now(), now())
                     """)
                 .param("id", leadId)
                 .param("lid", listingId)
                 .param("uid", claims.userId())
                 .param("adv", advertiserIdStr)
-                .param("intent", intentType)
                 .param("msg", req.message())
                 .param("name", req.contactName())
                 .param("email", req.contactEmail())
