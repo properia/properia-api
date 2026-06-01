@@ -39,10 +39,13 @@ public class VisitAvailabilityController {
 
         // Load listing info
         var listingOpt = jdbc.sql("""
-                SELECT li.id, li.advertiser_id, li.visit_booking_enabled, li.online_visit_available,
+                SELECT li.id, li.advertiser_id,
+                       COALESCE(lc.visit_booking_enabled, true) AS visit_booking_enabled,
+                       COALESCE(lc.online_visit_available, false) AS online_visit_available,
                        a.accepts_online_visits
                 FROM properia.listings li
                 JOIN properia.advertisers a ON a.id = li.advertiser_id
+                LEFT JOIN properia.listing_commercial lc ON lc.listing_id = li.id
                 WHERE li.id = :lid AND li.status = 'published'
                 """).param("lid", listingId)
             .query((rs, n) -> {
