@@ -494,7 +494,7 @@ public class VisitController {
                     UPDATE properia.visit_email_verifications
                     SET failed_attempts = failed_attempts + 1, updated_at = now()
                     WHERE id = :id
-                    """).param("id", verification.get("id")).update();
+                    """).param("id", UUID.fromString(verification.get("id").toString())).update();
             throw new DomainException("VALIDATION_ERROR", "Código inválido.", 422);
         }
 
@@ -503,7 +503,7 @@ public class VisitController {
         jdbc.sql("""
                 UPDATE properia.visit_email_verifications
                 SET consumed_at = now(), failed_attempts = 0, updated_at = now() WHERE id = :id
-                """).param("id", verification.get("id")).update();
+                """).param("id", UUID.fromString(verification.get("id").toString())).update();
 
         return ResponseEntity.ok(Map.of("data", Map.of("verified", true)));
     }

@@ -35,12 +35,7 @@ public class VisitAvailabilityController {
     @GetMapping("/api/visitas/disponibilidade")
     public ResponseEntity<?> getListingAvailability(
             @RequestParam UUID listingId,
-            @RequestParam(defaultValue = "onsite") String mode,
-            @AuthenticationPrincipal JwtClaims claims) {
-
-        if (claims == null) {
-            throw new DomainException("UNAUTHORIZED", "Autenticação necessária.", 401);
-        }
+            @RequestParam(defaultValue = "onsite") String mode) {
 
         // Load listing info
         var listingOpt = jdbc.sql("""
