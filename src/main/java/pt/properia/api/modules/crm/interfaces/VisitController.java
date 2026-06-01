@@ -464,13 +464,15 @@ public class VisitController {
                 SELECT id, code_hash, expires_at, consumed_at, failed_attempts
                 FROM properia.visit_email_verifications WHERE user_id = :uid
                 """).param("uid", claims.userId())
-            .query((rs, n) -> Map.of(
-                "id", rs.getString("id"),
-                "codeHash", rs.getString("code_hash"),
-                "expiresAt", (Object) rs.getTimestamp("expires_at"),
-                "consumedAt", (Object) rs.getTimestamp("consumed_at"),
-                "failedAttempts", rs.getInt("failed_attempts")
-            )).optional()
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("id", rs.getString("id"));
+                m.put("codeHash", rs.getString("code_hash"));
+                m.put("expiresAt", rs.getTimestamp("expires_at"));
+                m.put("consumedAt", rs.getTimestamp("consumed_at"));
+                m.put("failedAttempts", rs.getInt("failed_attempts"));
+                return m;
+            }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Não existe um código ativo para esta conta.", 404));
 
         if (verification.get("consumedAt") != null) {
@@ -518,12 +520,14 @@ public class VisitController {
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.id = :id AND l.user_id = :uid
                 """).param("id", id).param("uid", claims.userId())
-            .query((rs, n) -> Map.of(
-                "id", rs.getString("id"),
-                "status", rs.getString("status"),
-                "startsAt", (Object) rs.getTimestamp("starts_at"),
-                "buyerConfirmedAt", (Object) rs.getTimestamp("buyer_confirmed_at")
-            )).optional()
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("id", rs.getString("id"));
+                m.put("status", rs.getString("status"));
+                m.put("startsAt", rs.getTimestamp("starts_at"));
+                m.put("buyerConfirmedAt", rs.getTimestamp("buyer_confirmed_at"));
+                return m;
+            }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Visita não encontrada.", 404));
 
         if (!"confirmed".equals(visit.get("status"))) {
