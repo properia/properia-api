@@ -385,7 +385,8 @@ public class VisitAvailabilityController {
             }
         }
 
-        return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
+        // Return updated availability so the frontend can sync state
+        return getAdvertiserAvailability(claims);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
