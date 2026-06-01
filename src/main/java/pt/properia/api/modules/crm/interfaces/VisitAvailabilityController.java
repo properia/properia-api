@@ -40,11 +40,9 @@ public class VisitAvailabilityController {
         // Load listing info
         var listingOpt = jdbc.sql("""
                 SELECT li.id, li.advertiser_id,
-                       COALESCE(lc.visit_booking_enabled, true) AS visit_booking_enabled,
-                       COALESCE(lc.online_visit_available, false) AS online_visit_available,
-                       a.accepts_online_visits
+                       COALESCE(lc.visit_booking_enabled, true)  AS visit_booking_enabled,
+                       COALESCE(lc.online_visit_available, false) AS online_visit_available
                 FROM properia.listings li
-                JOIN properia.advertisers a ON a.id = li.advertiser_id
                 LEFT JOIN properia.listing_commercial lc ON lc.listing_id = li.id
                 WHERE li.id = :lid AND li.status = 'published'
                 """).param("lid", listingId)
@@ -52,7 +50,7 @@ public class VisitAvailabilityController {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("advertiserId", rs.getString("advertiser_id"));
                 m.put("visitBookingEnabled", rs.getBoolean("visit_booking_enabled"));
-                m.put("onlineVisitAvailable", rs.getBoolean("online_visit_available") && rs.getBoolean("accepts_online_visits"));
+                m.put("onlineVisitAvailable", rs.getBoolean("online_visit_available"));
                 return m;
             }).optional();
 
@@ -61,7 +59,7 @@ public class VisitAvailabilityController {
         }
 
         var listing = listingOpt.get();
-        var advertiserId = listing.get("advertiserId").toString();
+        var advertiserId = UUID.fromString(listing.get("advertiserId").toString());
         boolean visitBookingEnabled = Boolean.TRUE.equals(listing.get("visitBookingEnabled"));
         boolean onlineVisitAvailable = Boolean.TRUE.equals(listing.get("onlineVisitAvailable"));
 

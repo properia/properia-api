@@ -90,6 +90,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/public/buyer-consent/**").permitAll()
 
                 // Visit requests (unauthenticated visitors can request)
+                .requestMatchers(HttpMethod.GET, "/api/visitas/disponibilidade").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/visitas").permitAll()
                 .requestMatchers("/api/visitas/email-verification/**").permitAll()
 
