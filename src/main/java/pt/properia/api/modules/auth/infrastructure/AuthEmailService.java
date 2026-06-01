@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import pt.properia.api.shared.domain.DomainException;
 import reactor.core.publisher.Mono;
 
 import java.util.Map;
@@ -91,16 +92,20 @@ public class AuthEmailService {
                 .retrieve()
                 .onStatus(status -> !status.is2xxSuccessful(), resp ->
                     resp.bodyToMono(String.class).flatMap(body -> {
-                        log.error("Resend API error {} sending to={} subject={}: {}", resp.statusCode().value(), to, subject, body);
-                        return Mono.error(new RuntimeException("Resend error " + resp.statusCode().value() + ": " + body));
+                        log.error("Resend API error status={} from='{}' to={} subject='{}' body={}",
+                            resp.statusCode().value(), from, to, subject, body);
+                        return Mono.error(new DomainException("EMAIL_SEND_FAILED",
+                            "Resend " + resp.statusCode().value() + ": " + body, 503));
                     })
                 )
                 .toBodilessEntity()
                 .block(java.time.Duration.ofSeconds(10));
-            log.info("Email sent: to={} subject={}", to, subject);
+            log.info("Email sent ok: from='{}' to={} subject='{}'", from, to, subject);
+        } catch (DomainException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Failed to send email to={} subject={}: {}", to, subject, e.getMessage());
-            throw new RuntimeException("Falha ao enviar email: " + e.getMessage(), e);
+            log.error("Failed to send email from='{}' to={} subject='{}': {}", from, to, subject, e.getMessage());
+            throw new DomainException("EMAIL_SEND_FAILED", "Não foi possível enviar o email: " + e.getMessage(), 503);
         }
     }
 
