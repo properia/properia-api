@@ -158,7 +158,7 @@ public class BillingService {
         var snapshot = billingRepo.getSnapshot(advertiserId);
         var meta = snapshot.billingMetadata();
         return new PlanInfo(
-            snapshot.planCode() != null ? snapshot.planCode() : "free",
+            snapshot.planCode() != null ? snapshot.planCode() : "starter",
             meta.getOrDefault("paymentStatus", "none").toString(),
             snapshot.creditBalance(),
             meta.containsKey("trialActivatedAt") ? meta.get("trialActivatedAt").toString() : null,
