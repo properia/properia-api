@@ -495,14 +495,17 @@ public class AdvertiserMiscController {
                 """).param("adv", advertiserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
-                m.put("id", rs.getString("id"));
-                m.put("type", "follow_up");
-                m.put("leadId", rs.getString("id"));
+                var leadId = rs.getString("id");
+                var listingId = rs.getString("listing_id");
+                m.put("id", leadId);
+                m.put("leadId", leadId);
+                m.put("listingId", listingId);
                 m.put("title", "Seguimento: " + Optional.ofNullable(rs.getString("contact_name")).orElse("Lead"));
                 m.put("description", Optional.ofNullable(rs.getString("listing_title")).orElse(""));
-                m.put("stage", rs.getString("stage"));
-                m.put("dueAt", rs.getTimestamp("created_at").toInstant().toString());
+                m.put("actionLabel", "Ver lead");
                 m.put("priority", "new".equals(rs.getString("stage")) ? "high" : "medium");
+                m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
+                m.put("href", "/anunciante/leads");
                 return (Map<String, Object>) m;
             }).list();
 
