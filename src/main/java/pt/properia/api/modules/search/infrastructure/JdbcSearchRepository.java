@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import pt.properia.api.modules.search.application.SearchRepository;
 import pt.properia.api.modules.search.application.dto.ListingSearchItemDto;
+import pt.properia.api.modules.search.application.dto.PriceHistorySnapshotDto;
 import pt.properia.api.modules.search.application.dto.SearchParams;
 import pt.properia.api.modules.search.application.dto.SearchResultDto;
 
@@ -66,7 +67,10 @@ public class JdbcSearchRepository implements SearchRepository {
               l.published_at, l.updated_at,
               com.floorplan_url, com.youtube_tour_url,
               zs.zone_label_primary, zs.zone_summary_short,
-              (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total
+              (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total,
+              (SELECT COUNT(*)::int FROM properia.listing_price_history ph WHERE ph.listing_id = l.id) AS ph_change_count,
+              (SELECT ph2.price_amount FROM properia.listing_price_history ph2 WHERE ph2.listing_id = l.id ORDER BY ph2.recorded_at ASC LIMIT 1) AS ph_first_price,
+              (SELECT ph3.recorded_at FROM properia.listing_price_history ph3 WHERE ph3.listing_id = l.id ORDER BY ph3.recorded_at DESC LIMIT 1) AS ph_last_change_at
             FROM properia.listings l
             LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id
             LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
@@ -272,6 +276,12 @@ public class JdbcSearchRepository implements SearchRepository {
             params.put("commercialPermittedUse", p.commercialPermittedUse().toArray(String[]::new));
         }
 
+        // Advertiser filter (agency profile page)
+        if (p.advertiserId() != null && !p.advertiserId().isBlank()) {
+            parts.add("l.advertiser_id = :advertiserId::uuid");
+            params.put("advertiserId", p.advertiserId());
+        }
+
         // Text search
         if (p.q() != null && !p.q().isBlank()) {
             parts.add("(l.title_normalized ILIKE :q OR l.city ILIKE :q OR l.district ILIKE :q OR l.parish ILIKE :q)");
@@ -374,8 +384,34 @@ public class JdbcSearchRepository implements SearchRepository {
             updatedAt != null ? updatedAt.toInstant() : null,
             rs.getString("zone_label_primary"),
             rs.getString("zone_summary_short"),
-            rs.getInt("detail_views_total")
+            rs.getInt("detail_views_total"),
+            buildPriceHistorySnapshot(rs)
         );
+    }
+
+    private PriceHistorySnapshotDto buildPriceHistorySnapshot(ResultSet rs) throws SQLException {
+        int changeCount = rs.getInt("ph_change_count");
+        if (changeCount == 0) return null;
+
+        var firstPriceObj = rs.getObject("ph_first_price");
+        if (firstPriceObj == null) return null;
+
+        double firstPrice = ((Number) firstPriceObj).doubleValue();
+        double currentPrice = rs.getBigDecimal("price_amount").doubleValue();
+        var lastChangeAtTs = rs.getTimestamp("ph_last_change_at");
+        String lastChangeAt = lastChangeAtTs != null ? lastChangeAtTs.toInstant().toString() : null;
+
+        if (currentPrice < firstPrice - 0.01) {
+            double delta = firstPrice - currentPrice;
+            double pct = Math.round((delta / firstPrice) * 1000.0) / 10.0;
+            return new PriceHistorySnapshotDto("down", pct, delta, lastChangeAt, changeCount);
+        }
+        if (currentPrice > firstPrice + 0.01) {
+            double delta = currentPrice - firstPrice;
+            double pct = Math.round((delta / firstPrice) * 1000.0) / 10.0;
+            return new PriceHistorySnapshotDto("up", pct, delta, lastChangeAt, changeCount);
+        }
+        return new PriceHistorySnapshotDto("stable", null, null, null, changeCount);
     }
 
     private List<String> parseImageUrls(ResultSet rs) throws SQLException {

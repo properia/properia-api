@@ -54,7 +54,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasVehicleAccess,
             @RequestParam(defaultValue = "false") boolean commercialHasFluePipe,
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
-            @RequestParam(required = false) String commercialPermittedUse) {
+            @RequestParam(required = false) String commercialPermittedUse,
+            @RequestParam(required = false) String advertiserId) {
 
         int safePage = Math.max(1, page);
         int safePageSize = Math.min(48, Math.max(1, pageSize));
@@ -74,7 +75,8 @@ public class SearchController {
             roomCoupleAllowed, roomIsExterior, roomMinStayMonths,
             commercialHasShopfront, splitCsv(commercialStreetVisibility),
             commercialHasVehicleAccess, commercialHasFluePipe,
-            commercialHasExtractionSystem, splitCsv(commercialPermittedUse)
+            commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
+            advertiserId
         );
 
         var result = useCase.search(params);
@@ -110,7 +112,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasVehicleAccess,
             @RequestParam(defaultValue = "false") boolean commercialHasFluePipe,
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
-            @RequestParam(required = false) String commercialPermittedUse) {
+            @RequestParam(required = false) String commercialPermittedUse,
+            @RequestParam(required = false) String advertiserId) {
 
         var params = new SearchParams(
             q, negocio,
@@ -127,7 +130,8 @@ public class SearchController {
             roomCoupleAllowed, roomIsExterior, roomMinStayMonths,
             commercialHasShopfront, splitCsv(commercialStreetVisibility),
             commercialHasVehicleAccess, commercialHasFluePipe,
-            commercialHasExtractionSystem, splitCsv(commercialPermittedUse)
+            commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
+            advertiserId
         );
 
         long total = useCase.count(params);

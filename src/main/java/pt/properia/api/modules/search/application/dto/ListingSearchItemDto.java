@@ -74,5 +74,6 @@ public record ListingSearchItemDto(
     Instant updatedAt,
     String zoneLabelPrimary,
     String zoneSummaryShort,
-    int detailViewsTotal
+    int detailViewsTotal,
+    PriceHistorySnapshotDto priceHistorySnapshot
 ) {}

@@ -40,7 +40,8 @@ public record SearchParams(
     boolean commercialHasVehicleAccess,
     boolean commercialHasFluePipe,
     boolean commercialHasExtractionSystem,
-    List<String> commercialPermittedUse
+    List<String> commercialPermittedUse,
+    String advertiserId
 ) {
     public static SearchParams defaults() {
         return new SearchParams(
@@ -50,7 +51,8 @@ public record SearchParams(
             "recente", 1, 24,
             null, null, null, null,
             false, false, false, false, false, null,
-            false, List.of(), false, false, false, List.of()
+            false, List.of(), false, false, false, List.of(),
+            null
         );
     }
 }

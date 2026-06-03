@@ -31,5 +31,6 @@ public record UpdateListingRequest(
     boolean hasAirConditioning,
     boolean hasSolarPanels,
     boolean hasSeaView,
-    boolean hasFireplace
+    boolean hasFireplace,
+    Boolean isFeatured
 ) {}

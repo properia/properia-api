@@ -47,7 +47,8 @@ public class UpdateListingUseCase {
         boolean hasAirConditioning,
         boolean hasSolarPanels,
         boolean hasSeaView,
-        boolean hasFireplace
+        boolean hasFireplace,
+        Boolean isFeatured
     ) {}
 
     public Listing execute(Command cmd) {
@@ -86,6 +87,7 @@ public class UpdateListingUseCase {
         listing.setHasSolarPanels(cmd.hasSolarPanels());
         listing.setHasSeaView(cmd.hasSeaView());
         listing.setHasFireplace(cmd.hasFireplace());
+        if (cmd.isFeatured() != null) listing.setFeatured(cmd.isFeatured());
 
         return repository.save(listing);
     }

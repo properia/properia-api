@@ -58,7 +58,8 @@ public class AdvertiserListingController {
             req.bedrooms(), req.bathrooms(), req.suites(),
             req.usableAreaM2(), req.grossAreaM2(),
             req.city(), req.district(), req.parish(), req.postalCode(),
-            req.conditionDeclared(), req.furnishedDeclared()
+            req.conditionDeclared(), req.furnishedDeclared(),
+            req.isFeatured()
         ));
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
             "id", listing.getId(),
@@ -88,7 +89,8 @@ public class AdvertiserListingController {
             req.energyRating(), req.sunExposure(),
             req.hasElevator(), req.hasBalcony(), req.hasTerrace(), req.hasGarden(),
             req.hasPool(), req.hasStorageRoom(), req.hasGarage(), req.hasEquippedKitchen(),
-            req.hasAirConditioning(), req.hasSolarPanels(), req.hasSeaView(), req.hasFireplace()
+            req.hasAirConditioning(), req.hasSolarPanels(), req.hasSeaView(), req.hasFireplace(),
+            req.isFeatured()
         ));
         return ResponseEntity.ok(Map.of("data", Map.of(
             "id", listing.getId(),

@@ -35,7 +35,8 @@ public class CreateListingUseCase {
         String parish,
         String postalCode,
         String conditionDeclared,
-        String furnishedDeclared
+        String furnishedDeclared,
+        Boolean isFeatured
     ) {}
 
     public Listing execute(Command cmd) {
@@ -71,6 +72,7 @@ public class CreateListingUseCase {
         listing.setPostalCode(cmd.postalCode());
         listing.setConditionDeclared(cmd.conditionDeclared());
         listing.setFurnishedDeclared(cmd.furnishedDeclared());
+        if (Boolean.TRUE.equals(cmd.isFeatured())) listing.setFeatured(true);
         listing.setStatus("draft");
 
         return repository.save(listing);

@@ -22,5 +22,6 @@ public record CreateListingRequest(
     String parish,
     String postalCode,
     String conditionDeclared,
-    String furnishedDeclared
+    String furnishedDeclared,
+    Boolean isFeatured
 ) {}

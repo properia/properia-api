@@ -36,6 +36,7 @@ public class PatchListingService {
     public Map<String, Object> patch(UUID listingId, UUID advertiserId, Map<String, Object> body) {
         var listing = repository.findByIdAndAdvertiserId(listingId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
+        final BigDecimal priceBeforePatch = listing.getPriceAmount();
 
         // ── Status ────────────────────────────────────────────────────────────
         if (body.containsKey("status")) {
@@ -122,6 +123,23 @@ public class PatchListingService {
         if (body.containsKey("longitude")) listing.setLongitude(doubleOrNull(body, "longitude"));
 
         var saved = repository.save(listing);
+
+        // ── Price history ─────────────────────────────────────────────────────
+        if (body.containsKey("priceAmount") && saved.getPriceAmount() != null) {
+            boolean changed = priceBeforePatch == null
+                || priceBeforePatch.compareTo(saved.getPriceAmount()) != 0;
+            if (changed) {
+                jdbc.sql("""
+                    INSERT INTO properia.listing_price_history
+                      (listing_id, price_amount, price_currency)
+                    VALUES (:lid, :price, :currency)
+                    """)
+                    .param("lid",      saved.getId())
+                    .param("price",    saved.getPriceAmount())
+                    .param("currency", saved.getPriceCurrency() != null ? saved.getPriceCurrency() : "EUR")
+                    .update();
+            }
+        }
 
         // ── Zone snapshot trigger ─────────────────────────────────────────────
         // Trigger async zone processing when listing is published with coordinates.
