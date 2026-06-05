@@ -31,6 +31,15 @@ public class ListingCommercial {
     @Column(name = "virtual_tour_url")
     private String virtualTourUrl;
 
+    @Column(name = "virtual_tour_status")
+    private String virtualTourStatus;
+
+    @Column(name = "virtual_tour_render_id")
+    private String virtualTourRenderId;
+
+    @Column(name = "virtual_tour_generated_at")
+    private java.time.Instant virtualTourGeneratedAt;
+
     @Column(name = "floorplan_url")
     private String floorplanUrl;
 
@@ -52,7 +61,15 @@ public class ListingCommercial {
     public boolean isVisitBookingEnabled() { return visitBookingEnabled; }
     public String getYoutubeTourUrl() { return youtubeTourUrl; }
     public String getVirtualTourUrl() { return virtualTourUrl; }
+    public String getVirtualTourStatus() { return virtualTourStatus; }
+    public String getVirtualTourRenderId() { return virtualTourRenderId; }
+    public java.time.Instant getVirtualTourGeneratedAt() { return virtualTourGeneratedAt; }
     public String getFloorplanUrl() { return floorplanUrl; }
+
+    public void setVirtualTourUrl(String url) { this.virtualTourUrl = url; }
+    public void setVirtualTourStatus(String status) { this.virtualTourStatus = status; }
+    public void setVirtualTourRenderId(String renderId) { this.virtualTourRenderId = renderId; }
+    public void setVirtualTourGeneratedAt(java.time.Instant ts) { this.virtualTourGeneratedAt = ts; }
     public boolean isShowPhone() { return showPhone; }
     public boolean isShowChat() { return showChat; }
 }

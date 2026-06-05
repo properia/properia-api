@@ -34,3 +34,9 @@ properia:
     cookie-secure: false        # No HTTPS needed in dev
   stripe:
     billing-provider: fake      # Use fake Stripe in dev
+  shotstack:
+    api-key: 3qIfTFtXt3ibD0Oc5KJQEnH1QKvduOBegnygOHNy
+  app:
+    url: https://clean-symbols-win.loca.lt
+  fal:
+    api-key: df85460f-ca30-4dcb-8150-6faeb328cbeb:6441646964fe7728626bd2128d95e034

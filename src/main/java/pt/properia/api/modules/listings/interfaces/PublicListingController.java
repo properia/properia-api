@@ -36,6 +36,27 @@ public class PublicListingController {
         // Enrich with zone snapshot data
         @SuppressWarnings("unchecked")
         var listingMap = (java.util.LinkedHashMap<String, Object>) objectMapper.convertValue(listing, java.util.LinkedHashMap.class);
+
+        // Extract imageUrls and floorPlanUrl from the media list
+        try {
+            @SuppressWarnings("unchecked")
+            var mediaList = (java.util.List<java.util.Map<String, Object>>) listingMap.get("media");
+            if (mediaList != null) {
+                var imageUrls = mediaList.stream()
+                    .filter(m -> "image".equals(m.get("mediaType")))
+                    .map(m -> (String) m.get("url"))
+                    .filter(u -> u != null)
+                    .toList();
+                listingMap.put("imageUrls", imageUrls);
+                var floorPlan = mediaList.stream()
+                    .filter(m -> "floorplan".equals(m.get("mediaType")))
+                    .map(m -> (String) m.get("url"))
+                    .filter(u -> u != null)
+                    .findFirst().orElse(null);
+                listingMap.put("floorPlanUrl", floorPlan);
+            }
+        } catch (Exception ignored) {}
+
         var listingId  = listingMap.get("id");
         if (listingId != null) {
             try {
@@ -53,6 +74,31 @@ public class PublicListingController {
                 listingMap.put("detailViewsTotal", viewsTotal.intValue());
             } catch (Exception e) {
                 listingMap.put("detailViewsTotal", 0);
+            }
+        }
+
+        // Enrich with virtual tour data
+        if (listingId != null) {
+            try {
+                var tourData = jdbc.sql("""
+                    SELECT virtual_tour_url, virtual_tour_status
+                    FROM properia.listing_commercial
+                    WHERE listing_id = :id
+                    """)
+                    .param("id", UUID.fromString(listingId.toString()))
+                    .query((rs, n) -> {
+                        var m = new java.util.LinkedHashMap<String, Object>();
+                        m.put("virtualTourUrl",    rs.getString("virtual_tour_url"));
+                        m.put("virtualTourStatus", rs.getString("virtual_tour_status"));
+                        return m;
+                    })
+                    .optional().orElse(null);
+                if (tourData != null) {
+                    listingMap.put("virtualTourUrl",    tourData.get("virtualTourUrl"));
+                    listingMap.put("virtualTourStatus", tourData.get("virtualTourStatus"));
+                }
+            } catch (Exception e) {
+                // non-fatal
             }
         }
 

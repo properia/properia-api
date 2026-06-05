@@ -131,6 +131,13 @@ properia:
   anthropic:
     api-key: ${ANTHROPIC_API_KEY:}
 
+  shotstack:
+    api-key: ${SHOTSTACK_API_KEY:}
+    api-url: ${SHOTSTACK_API_URL:https://api.shotstack.io/stage/render}
+
+  fal:
+    api-key: ${FAL_API_KEY:}
+
   media:
     provider: ${MEDIA_UPLOAD_PROVIDER:local}
     local-base-url: ${MEDIA_LOCAL_UPLOAD_BASE_URL:http://localhost:8080/uploads}
