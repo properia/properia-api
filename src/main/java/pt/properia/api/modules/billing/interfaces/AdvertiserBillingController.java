@@ -233,6 +233,7 @@ public class AdvertiserBillingController {
         caps.put("maxBuyerProfiles", isBusiness ? -1 : isPro ? 50 : 0);
         caps.put("buyerMatchNotifications", isPro);
         caps.put("buyerProfileExport", isBusiness);
+        caps.put("maxVirtualToursPerMonth", isBusiness ? 15 : isPro ? 5 : 0);
         return caps;
     }
 

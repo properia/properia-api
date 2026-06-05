@@ -48,6 +48,14 @@ public class VirtualTourService {
         listingRepository.findByIdAndAdvertiserId(listingId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
 
+        // Enforce monthly quota based on plan
+        var quota = getQuota(advertiserId);
+        if (quota.max() != -1 && quota.used() >= quota.max()) {
+            throw new DomainException("QUOTA_EXCEEDED",
+                "Atingiste o limite de " + quota.max() + " tours virtuais este mês. "
+                + "Faz upgrade ou aguarda o próximo ciclo.", 422);
+        }
+
         var photos = mediaRepo.findByListingIdOrderBySortOrderAsc(listingId).stream()
             .filter(m -> "image".equals(m.getMediaType()))
             .map(m -> {
@@ -123,7 +131,7 @@ public class VirtualTourService {
         listingRepository.findByIdAndAdvertiserId(listingId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
 
-        return jdbc.sql("""
+        var tour = jdbc.sql("""
             SELECT virtual_tour_status, virtual_tour_url, virtual_tour_generated_at
             FROM properia.listing_commercial
             WHERE listing_id = :lid
@@ -134,13 +142,55 @@ public class VirtualTourService {
                 rs.getString("virtual_tour_url"),
                 rs.getTimestamp("virtual_tour_generated_at") != null
                     ? rs.getTimestamp("virtual_tour_generated_at").toInstant().toString()
-                    : null
+                    : null,
+                null, null
             ))
             .optional()
-            .orElse(new TourStatus(null, null, null));
+            .orElse(new TourStatus(null, null, null, null, null));
+
+        var quota = getQuota(advertiserId);
+        return new TourStatus(tour.status(), tour.url(), tour.generatedAt(),
+            quota.used(), quota.max());
     }
 
-    public record TourStatus(String status, String url, String generatedAt) {}
+    public record TourStatus(String status, String url, String generatedAt,
+                              Integer quotaUsed, Integer quotaMax) {}
+
+    // ── Quota ─────────────────────────────────────────────────────────────────
+
+    private record QuotaInfo(int used, int max) {}
+
+    private QuotaInfo getQuota(UUID advertiserId) {
+        // Count tours generated this calendar month for this advertiser
+        var used = jdbc.sql("""
+            SELECT COUNT(*) FROM properia.listing_commercial lc
+            JOIN properia.listings l ON l.id = lc.listing_id
+            WHERE l.advertiser_id = :adv
+              AND lc.virtual_tour_status = 'ready'
+              AND lc.virtual_tour_generated_at >= date_trunc('month', now())
+            """)
+            .param("adv", advertiserId)
+            .query(Integer.class)
+            .single();
+
+        // Fetch plan from advertiser_billing
+        var planCode = jdbc.sql("""
+            SELECT COALESCE(plan_code, 'starter') FROM properia.advertiser_billing
+            WHERE advertiser_id = :adv
+            """)
+            .param("adv", advertiserId)
+            .query(String.class)
+            .optional()
+            .orElse("starter");
+
+        var max = switch (planCode) {
+            case "business", "pilot" -> 15;
+            case "pro"               -> 5;
+            default                  -> 0; // starter
+        };
+
+        return new QuotaInfo(used, max);
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
