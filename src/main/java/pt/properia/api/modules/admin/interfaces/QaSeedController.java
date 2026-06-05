@@ -105,7 +105,7 @@ public class QaSeedController {
         for (var m : new Mb[]{new Mb(U1,"owner"),new Mb(U2,"editor"),new Mb(U3,"sales")}) {
             jdbc.sql("""
                 INSERT INTO properia.advertiser_users(advertiser_id,user_id,membership_role,created_at)
-                VALUES(:adv,:uid,:role,now())
+                VALUES(:adv,:uid,CAST(:role AS properia.advertiser_membership_role),now())
             """).param("adv",ADV).param("uid",m.uid()).param("role",m.role()).update();
         }
 
