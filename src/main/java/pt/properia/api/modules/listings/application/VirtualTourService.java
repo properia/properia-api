@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.listings.infrastructure.ListingMediaJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -90,13 +91,13 @@ public class VirtualTourService {
 
             String finalVideoUrl;
             if (clipUrls.size() == 1) {
-                // Single clip — use directly, no concat needed
-                finalVideoUrl = clipUrls.get(0);
+                // Single clip — download to local storage; fal.ai URLs expire
+                log.info("Downloading single clip for listing {}", listingId);
+                finalVideoUrl = downloadAndStore(listingId, clipUrls.get(0));
             } else {
-                // Multiple clips — concatenate with ffmpeg
+                // Multiple clips — concatenate with ffmpeg then store
                 log.info("Concatenating {} clips for listing {}", clipUrls.size(), listingId);
                 var stitchedPath = ffmpeg.concatenate(clipUrls);
-                // Store the stitched video — serve via local storage in dev
                 finalVideoUrl = storeVideo(listingId, stitchedPath);
             }
 
@@ -107,6 +108,24 @@ public class VirtualTourService {
             log.error("Failed to generate virtual tour for listing {}", listingId, e);
             upsertCommercial(listingId, "error", null, null, null);
         }
+    }
+
+    /**
+     * Downloads a remote video URL (e.g. expiring fal.ai CDN link) and stores it locally.
+     * This prevents the tour from breaking when the original CDN URL expires.
+     */
+    private String downloadAndStore(UUID listingId, String remoteUrl) throws Exception {
+        var baseDir = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "properia-uploads", "tours");
+        java.nio.file.Files.createDirectories(baseDir);
+        var fileName = listingId + "-tour.mp4";
+        var dest = baseDir.resolve(fileName);
+
+        try (var in = URI.create(remoteUrl).toURL().openStream()) {
+            java.nio.file.Files.copy(in, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        log.info("Virtual tour downloaded and stored: {}", dest);
+        return appUrl + "/api/local-storage/media/tours/" + fileName;
     }
 
     /**

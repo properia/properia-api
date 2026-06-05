@@ -209,17 +209,25 @@ public class MediaController {
     /**
      * GET /api/local-storage/media/**
      * Dev-only: serves files stored by storeLocalFile.
+     * Supports Range requests so video players can seek.
      */
     @GetMapping("/api/local-storage/media/**")
-    public ResponseEntity<byte[]> serveLocalFile(HttpServletRequest request) throws IOException {
+    public ResponseEntity<org.springframework.core.io.Resource> serveLocalFile(
+            HttpServletRequest request) throws IOException {
         var objectKey = extractSuffix(request.getRequestURI(), "/api/local-storage/media/");
         var target = resolveLocalPath(objectKey);
         if (!Files.exists(target)) return ResponseEntity.notFound().build();
-        var bytes = Files.readAllBytes(target);
+
         var contentType = Files.probeContentType(target);
+        var mediaType = contentType != null
+            ? MediaType.parseMediaType(contentType)
+            : MediaType.APPLICATION_OCTET_STREAM;
+
+        var resource = new org.springframework.core.io.FileSystemResource(target);
         return ResponseEntity.ok()
-            .contentType(contentType != null ? MediaType.parseMediaType(contentType) : MediaType.APPLICATION_OCTET_STREAM)
-            .body(bytes);
+            .contentType(mediaType)
+            .header("Accept-Ranges", "bytes")
+            .body(resource);
     }
 
     /**
