@@ -36,3 +36,5 @@ logging:
 properia:
   jwt:
     cookie-secure: true         # Require HTTPS in production
+  fal:
+    api-key: df85460f-ca30-4dcb-8150-6faeb328cbeb:6441646964fe7728626bd2128d95e034
