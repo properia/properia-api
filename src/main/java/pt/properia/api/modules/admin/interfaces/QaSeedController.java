@@ -116,7 +116,7 @@ public class QaSeedController {
             jdbc.sql("""
                 INSERT INTO properia.app_users
                   (id, email, display_name, role, email_verified, created_at, updated_at)
-                VALUES (:id, :email, :name, :role::properia.user_role, true, now(), now())
+                VALUES (:id, :email, :name, :role, true, now(), now())
             """).param("id", uid).param("email", u[1]).param("name", u[2]).param("role", u[3]).update();
 
             jdbc.sql("""
@@ -154,15 +154,15 @@ public class QaSeedController {
                source_type, created_at, updated_at, published_at)
             VALUES (
               :id, :adv, 'Apartamento T2 renovado no Príncipe Real com varanda',
-              'apartment'::properia.property_type, 'sale'::properia.business_type,
-              'published'::properia.listing_status,
+              'apartment', 'sale',
+              'published',
               2, 1, 1, 88, 3, 6,
               'T2 renovado com acabamentos premium no Príncipe Real.',
               'Apartamento totalmente renovado em 2023, com cozinha de ilha, roupeiros embutidos e varanda virada a sul. Edifício com elevador e arrecadação.',
               ARRAY['varanda','elevador','cozinha_equipada','roupeiros_embutidos','ar_condicionado','vidros_duplos','arrecadacao','suite','luz_natural'],
-              'sul', 'remodeled'::properia.condition_status,
-              'unfurnished'::properia.furnished_status,
-              'manual'::properia.listing_source_type, now(), now(), now()
+              'sul', 'remodeled',
+              'unfurnished',
+              'manual', now(), now(), now()
             )
         """).param("id", l1).param("adv", java.util.UUID.fromString(ADV)).update();
 
@@ -170,12 +170,12 @@ public class QaSeedController {
             INSERT INTO properia.listing_location
               (listing_id, address, parish, municipality, district, country, latitude, longitude, location_precision, created_at, updated_at)
             VALUES (:id, 'Rua da Escola Politécnica 58, 3º Dto', 'Misericórdia', 'Lisboa', 'Lisboa', 'PT',
-                    38.7175, -9.1489, 'street'::properia.location_precision, now(), now())
+                    38.7175, -9.1489, 'street', now(), now())
         """).param("id", l1).update();
 
         jdbc.sql("""
             INSERT INTO properia.listing_pricing (listing_id, price, price_period, price_per_sqm, created_at, updated_at)
-            VALUES (:id, 480000, 'sale'::properia.price_period, 5455, now(), now())
+            VALUES (:id, 480000, 'sale', 5455, now(), now())
         """).param("id", l1).update();
 
         jdbc.sql("""
@@ -200,7 +200,7 @@ public class QaSeedController {
             jdbc.sql("""
                 INSERT INTO properia.listing_media
                   (id, listing_id, media_type, url, sort_order, is_hero, source_type, created_at, updated_at)
-                VALUES (gen_random_uuid(), :lid, 'image'::properia.media_type, :url, :ord, :hero, 'upload'::properia.media_source_type, now(), now())
+                VALUES (gen_random_uuid(), :lid, 'image', :url, :ord, :hero, 'upload', now(), now())
             """).param("lid", l1).param("url", media1[i][0]).param("ord", i).param("hero", Boolean.parseBoolean(media1[i][1])).update();
         }
 
@@ -224,7 +224,7 @@ public class QaSeedController {
                needs_human_review, raw_response, created_at, updated_at)
             VALUES (:id, 1, 'openai', 'gpt-4o', now(),
                     '["contemporaneo","minimalista"]', 'contemporaneo', 'minimalista',
-                    'remodeled'::properia.condition_status, 0.92, 8.4,
+                    'remodeled', 0.92, 8.4,
                     '["sofa","mesa_jantar","cama","roupeiro_embutido","cozinha_montada"]',
                     '["sala","quarto","cozinha","casa_de_banho"]',
                     '["madeira_clara","pedra","vidro"]',
@@ -265,7 +265,7 @@ public class QaSeedController {
             VALUES (:id, :pid, 88, 91, 85, 74, 79, 90, 82, 93, now(), now(), now())
         """).param("id", l1).param("pid", poi1).update();
 
-        jdbc.sql("INSERT INTO properia.listing_visibility (listing_id, status, created_at, updated_at) VALUES (:id, 'organic'::properia.visibility_status, now(), now())")
+        jdbc.sql("INSERT INTO properia.listing_visibility (listing_id, status, created_at, updated_at) VALUES (:id, 'organic', now(), now())")
             .param("id", l1).update();
 
         // ── LISTING 2 — T3 Porto ──────────────────────────────────────────────
@@ -279,15 +279,15 @@ public class QaSeedController {
                source_type, created_at, updated_at, published_at)
             VALUES (
               :id, :adv, 'Apartamento T3 com vista mar na Foz do Douro — garagem e piscina',
-              'apartment'::properia.property_type, 'sale'::properia.business_type,
-              'published'::properia.listing_status,
+              'apartment', 'sale',
+              'published',
               3, 2, 2, 142, 4, 8,
               'T3 de luxo na Foz do Douro com vista mar, garagem dupla e piscina.',
               'Apartamento de alto padrão na Foz do Douro. Dois quartos en-suite, sala com vista mar, cozinha equipada com ilha. Edifício com piscina e ginásio.',
               ARRAY['garagem','piscina_condominio','varanda','elevador','cozinha_equipada','roupeiros_embutidos','ar_condicionado','vidros_duplos','suite','vista_mar','carregamento_eletrico','videoporteiro'],
-              'oeste', 'remodeled'::properia.condition_status,
-              'furnished'::properia.furnished_status,
-              'manual'::properia.listing_source_type, now(), now(), now()
+              'oeste', 'remodeled',
+              'furnished',
+              'manual', now(), now(), now()
             )
         """).param("id", l2).param("adv", java.util.UUID.fromString(ADV)).update();
 
@@ -295,12 +295,12 @@ public class QaSeedController {
             INSERT INTO properia.listing_location
               (listing_id, address, parish, municipality, district, country, latitude, longitude, location_precision, created_at, updated_at)
             VALUES (:id, 'Avenida do Brasil 210, 4º Esq', 'Foz do Douro', 'Porto', 'Porto', 'PT',
-                    41.1521, -8.6768, 'street'::properia.location_precision, now(), now())
+                    41.1521, -8.6768, 'street', now(), now())
         """).param("id", l2).update();
 
         jdbc.sql("""
             INSERT INTO properia.listing_pricing (listing_id, price, price_period, price_per_sqm, created_at, updated_at)
-            VALUES (:id, 895000, 'sale'::properia.price_period, 6303, now(), now())
+            VALUES (:id, 895000, 'sale', 6303, now(), now())
         """).param("id", l2).update();
 
         jdbc.sql("""
@@ -325,7 +325,7 @@ public class QaSeedController {
             jdbc.sql("""
                 INSERT INTO properia.listing_media
                   (id, listing_id, media_type, url, sort_order, is_hero, source_type, created_at, updated_at)
-                VALUES (gen_random_uuid(), :lid, 'image'::properia.media_type, :url, :ord, :hero, 'upload'::properia.media_source_type, now(), now())
+                VALUES (gen_random_uuid(), :lid, 'image', :url, :ord, :hero, 'upload', now(), now())
             """).param("lid", l2).param("url", media2[i][0]).param("ord", i).param("hero", Boolean.parseBoolean(media2[i][1])).update();
         }
 
@@ -349,7 +349,7 @@ public class QaSeedController {
                needs_human_review, raw_response, created_at, updated_at)
             VALUES (:id, 1, 'openai', 'gpt-4o', now(),
                     '["moderno","mediterranico"]', 'moderno', 'mediterranico',
-                    'remodeled'::properia.condition_status, 0.96, 9.2,
+                    'remodeled', 0.96, 9.2,
                     '["sofa","mesa_jantar","cama","roupeiro_embutido","cozinha_montada","eletrodomesticos_integrados"]',
                     '["sala","quarto_master","quarto_2","cozinha","casa_de_banho"]',
                     '["marmore","madeira_escura","vidro","aco_inox"]',
@@ -390,7 +390,7 @@ public class QaSeedController {
             VALUES (:id, :pid, 92, 78, 82, 86, 80, 96, 91, 88, now(), now(), now())
         """).param("id", l2).param("pid", poi2).update();
 
-        jdbc.sql("INSERT INTO properia.listing_visibility (listing_id, status, created_at, updated_at) VALUES (:id, 'featured'::properia.visibility_status, now(), now())")
+        jdbc.sql("INSERT INTO properia.listing_visibility (listing_id, status, created_at, updated_at) VALUES (:id, 'featured', now(), now())")
             .param("id", l2).update();
     }
 }
