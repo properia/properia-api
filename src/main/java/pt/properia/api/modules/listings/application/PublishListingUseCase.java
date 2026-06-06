@@ -1,19 +1,33 @@
 package pt.properia.api.modules.listings.application;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.modules.listings.domain.Listing;
+import pt.properia.api.modules.zone.application.ZoneSnapshotService;
 import pt.properia.api.shared.domain.DomainException;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class PublishListingUseCase {
 
-    private final ListingRepository repository;
+    private static final Logger log = LoggerFactory.getLogger(PublishListingUseCase.class);
 
-    public PublishListingUseCase(ListingRepository repository) {
-        this.repository = repository;
+    private final ListingRepository repository;
+    private final ZoneSnapshotService zoneSnapshotService;
+    private final JdbcClient jdbc;
+
+    public PublishListingUseCase(ListingRepository repository,
+                                  ZoneSnapshotService zoneSnapshotService,
+                                  JdbcClient jdbc) {
+        this.repository          = repository;
+        this.zoneSnapshotService = zoneSnapshotService;
+        this.jdbc                = jdbc;
     }
 
     public record Command(UUID listingId, UUID advertiserId) {}
@@ -27,12 +41,46 @@ public class PublishListingUseCase {
         }
 
         var now = Instant.now();
+        var isFirstPublish = listing.getFirstPublishedAt() == null;
         listing.setStatus("published");
         listing.setPublishedAt(now);
-        if (listing.getFirstPublishedAt() == null) {
-            listing.setFirstPublishedAt(now);
+        if (isFirstPublish) listing.setFirstPublishedAt(now);
+
+        var saved = repository.save(listing);
+
+        // Auto-trigger zone enrichment on first publish if coordinates are available.
+        // Re-publish (paused → published) does not re-trigger to avoid redundant processing.
+        if (isFirstPublish && saved.getLatitude() != null && saved.getLongitude() != null) {
+            var loc = fetchLocationForZone(saved.getId());
+            log.info("Auto-triggering zone enrichment for listing {} on first publish", saved.getId());
+            zoneSnapshotService.processAsync(
+                saved.getId(),
+                saved.getLatitude(),
+                saved.getLongitude(),
+                loc.get("street"),
+                loc.get("neighborhood"),
+                saved.getCity(),
+                loc.get("precision")
+            );
         }
 
-        return repository.save(listing);
+        return saved;
+    }
+
+    private Map<String, String> fetchLocationForZone(UUID listingId) {
+        return jdbc.sql("""
+                SELECT street, neighborhood, location_precision AS precision
+                FROM properia.listing_location WHERE listing_id = :lid
+                """)
+            .param("lid", listingId)
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, String>();
+                m.put("street",       rs.getString("street"));
+                m.put("neighborhood", rs.getString("neighborhood"));
+                m.put("precision",    rs.getString("precision"));
+                return m;
+            })
+            .optional()
+            .orElseGet(LinkedHashMap::new);
     }
 }
