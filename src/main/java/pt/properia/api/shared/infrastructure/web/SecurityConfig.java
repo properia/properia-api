@@ -55,8 +55,6 @@ public class SecurityConfig {
 
             // Route authorization rules
             .authorizeHttpRequests(auth -> auth
-                // Temporary QA seed — DELETE after use
-                .requestMatchers("/api/internal/qa-reset").permitAll()
                 // Infrastructure
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
