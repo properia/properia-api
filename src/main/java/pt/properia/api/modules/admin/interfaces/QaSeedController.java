@@ -250,7 +250,7 @@ public class QaSeedController {
         jdbc.sql("""
             INSERT INTO properia.listing_features
               (listing_id,feature_flags,feature_tags,created_at,updated_at)
-            VALUES(:id,:flags::jsonb,:tags::jsonb,now(),now())
+            VALUES(:id,CAST(:flags AS jsonb),CAST(:tags AS jsonb),now(),now())
         """).param("id",id).param("flags",flagsJson).param("tags",tagsJson).update();
     }
 
@@ -290,9 +290,9 @@ public class QaSeedController {
                premium_score,family_friendly_score,home_office_score,luxury_score,
                needs_human_review,raw_response,created_at,updated_at)
             VALUES(:id,1,'openai','gpt-4o',now(),
-                   :styles::jsonb,:s1,:s2,
+                   CAST(:styles AS jsonb),:s1,:s2,
                    CAST(:cond AS properia.condition_status),:condConf,:quality,
-                   '[]'::jsonb,'[]'::jsonb,'[]'::jsonb,:signals::jsonb,
+                   '[]'::jsonb,'[]'::jsonb,'[]'::jsonb,CAST(:signals AS jsonb),
                    :light,:spacious,:layout,:premium,:family,:homeOff,:luxury,
                    false,'{}',now(),now())
         """)
@@ -322,7 +322,7 @@ public class QaSeedController {
         jdbc.sql("""
             INSERT INTO properia.listing_poi_snapshots
               (id,listing_id,provider,radius_m,poi_count,poi_data,processed_at,created_at)
-            VALUES(:pid,:lid,'overpass',500,2,:data::jsonb,now(),now())
+            VALUES(:pid,:lid,'overpass',500,2,CAST(:data AS jsonb),now(),now())
         """).param("pid",poiId).param("lid",lid).param("data",data).update();
     }
 
