@@ -374,8 +374,9 @@ public class PublicListingController {
             var synth = new LinkedHashMap<String, Object>();
             synth.put("priceAmount", ((Number) listing.get().get("priceAmount")).doubleValue());
             synth.put("priceCurrency", listing.get().get("priceCurrency"));
-            synth.put("recordedAt", listing.get().getOrDefault("refDate",
-                java.time.Instant.now().toString()));
+            // getOrDefault returns null when key exists with null value — use explicit fallback
+            var refDate = listing.get().get("refDate");
+            synth.put("recordedAt", refDate != null ? refDate : java.time.Instant.now().toString());
             items = List.of(synth);
         }
 
