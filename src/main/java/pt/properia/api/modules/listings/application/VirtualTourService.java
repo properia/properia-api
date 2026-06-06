@@ -192,10 +192,10 @@ public class VirtualTourService {
             .query(Integer.class)
             .single();
 
-        // Fetch plan from advertiser_billing
+        // Fetch plan from advertisers table (plan_code lives there, not in a separate billing table)
         var planCode = jdbc.sql("""
-            SELECT COALESCE(plan_code, 'starter') FROM properia.advertiser_billing
-            WHERE advertiser_id = :adv
+            SELECT COALESCE(plan_code, 'starter') FROM properia.advertisers
+            WHERE id = :adv
             """)
             .param("adv", advertiserId)
             .query(String.class)
