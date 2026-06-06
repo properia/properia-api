@@ -331,9 +331,21 @@ public class PublicListingController {
 
     @GetMapping("/{id}/price-history")
     public ResponseEntity<?> getPriceHistory(@PathVariable UUID id) {
-        var listing = jdbc.sql("SELECT price_amount, status FROM properia.listings WHERE id = :id")
+        var listing = jdbc.sql("""
+                SELECT price_amount, price_currency, status,
+                       COALESCE(published_at, created_at) AS ref_date
+                FROM properia.listings WHERE id = :id
+                """)
             .param("id", id)
-            .query((rs, n) -> Map.of("priceAmount", rs.getObject("price_amount"), "status", rs.getString("status")))
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("priceAmount", rs.getObject("price_amount"));
+                m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                m.put("status", rs.getString("status"));
+                m.put("refDate", rs.getTimestamp("ref_date") != null
+                    ? rs.getTimestamp("ref_date").toInstant().toString() : null);
+                return (Map<String, Object>) m;
+            })
             .optional();
         if (listing.isEmpty() || !"published".equals(listing.get().get("status"))) {
             throw new DomainException("NOT_FOUND", "Imóvel não encontrado.", 404);
@@ -354,6 +366,17 @@ public class PublicListingController {
                 }).list();
         } catch (Exception ignored) {
             items = List.of();
+        }
+
+        // Quando não há histórico, sintetizar 1 ponto com o preço actual e a data de publicação
+        // para que o gráfico mostre linha horizontal desde o início.
+        if (items.isEmpty() && listing.get().get("priceAmount") != null) {
+            var synth = new LinkedHashMap<String, Object>();
+            synth.put("priceAmount", ((Number) listing.get().get("priceAmount")).doubleValue());
+            synth.put("priceCurrency", listing.get().get("priceCurrency"));
+            synth.put("recordedAt", listing.get().getOrDefault("refDate",
+                java.time.Instant.now().toString()));
+            items = List.of(synth);
         }
 
         var currentPrice = listing.get().get("priceAmount") != null
