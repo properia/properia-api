@@ -16,6 +16,9 @@ FROM eclipse-temurin:21-jre-alpine AS runtime
 
 WORKDIR /app
 
+# ffmpeg for virtual tour video concatenation
+RUN apk add --no-cache ffmpeg
+
 # Non-root user for security
 RUN addgroup -S properia && adduser -S properia -G properia
 
