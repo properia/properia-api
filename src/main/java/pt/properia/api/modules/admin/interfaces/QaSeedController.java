@@ -152,9 +152,8 @@ public class QaSeedController {
             "Casal jovem ou investimento para arrendamento.",
             "Apartamento T2 Príncipe Real Lisboa — Renovado 2023",
             "T2 renovado no Príncipe Real. 88m², varanda a sul. €480.000.");
-        insertPoi(POI1, L1,
-            "[{\"type\":\"metro\",\"name\":\"Rato\",\"distance_m\":180},{\"type\":\"park\",\"name\":\"Jardim Príncipe Real\",\"distance_m\":280}]");
-        insertZoneScore(L1, POI1, 88, 91, 85, 74, 79, 90, 82, 93);
+        insertPoi(POI1, L1, 3, 2, 2, 4, 1);
+        insertZoneScore(L1, POI1, 8.5, 7.2, 9.1, 8.8, 9.3, 7.0);
         insertVisibility(L1, "organic");
 
         // ── LISTING 2 — T3 Porto ──────────────────────────────────────────────
@@ -189,9 +188,8 @@ public class QaSeedController {
             "Famílias exigentes ou executivos expatriados.",
             "Apartamento T3 Foz do Douro Porto — Vista Mar",
             "T3 de luxo na Foz do Douro. 142m², vista mar, garagem, piscina. €895.000.");
-        insertPoi(POI2, L2,
-            "[{\"type\":\"beach\",\"name\":\"Praia dos Ingleses\",\"distance_m\":180},{\"type\":\"park\",\"name\":\"Parque da Cidade\",\"distance_m\":820}]");
-        insertZoneScore(L2, POI2, 92, 78, 82, 86, 80, 96, 91, 88);
+        insertPoi(POI2, L2, 2, 3, 3, 5, 2);
+        insertZoneScore(L2, POI2, 9.2, 8.8, 7.8, 8.5, 8.8, 9.5);
         insertVisibility(L2, "featured");
     }
 
@@ -318,28 +316,43 @@ public class QaSeedController {
         .param("seoT",seoTitle).param("seoD",seoDesc).update();
     }
 
-    private void insertPoi(UUID poiId, UUID lid, String data) {
+    private void insertPoi(UUID poiId, UUID lid,
+                            int metro, int supermarket, int park, int restaurant, int school) {
         jdbc.sql("""
             INSERT INTO properia.listing_poi_snapshots
-              (id,listing_id,provider,radius_m,poi_count,poi_data,processed_at,created_at)
-            VALUES(:pid,:lid,'overpass',500,2,CAST(:data AS jsonb),now(),now())
-        """).param("pid",poiId).param("lid",lid).param("data",data).update();
+              (id,listing_id,source,radius_m,
+               transport_count,supermarket_count,park_count,restaurant_count,schools_count,
+               nearest_transport_m,nearest_supermarket_m,nearest_park_m,
+               processed_at,created_at,updated_at)
+            VALUES(:pid,:lid,'overpass',700,
+                   :metro,:supermarket,:park,:restaurant,:school,
+                   :metroM,:superM,:parkM,
+                   now(),now(),now())
+        """)
+        .param("pid",poiId).param("lid",lid)
+        .param("metro",metro).param("supermarket",supermarket)
+        .param("park",park).param("restaurant",restaurant).param("school",school)
+        .param("metroM",metro > 0 ? 220 : null)
+        .param("superM",supermarket > 0 ? 280 : null)
+        .param("parkM",park > 0 ? 350 : null)
+        .update();
     }
 
     private void insertZoneScore(UUID lid, UUID pid,
-                                  int zone, int transport, int commerce,
-                                  int education, int health, int leisure, int safety, int walk) {
+                                  double lifestyle, double family, double mobility,
+                                  double convenience, double walkability, double green) {
         jdbc.sql("""
             INSERT INTO properia.listing_zone_scores
-              (listing_id,poi_snapshot_id,zone_score,transport_score,commerce_score,
-               education_score,health_score,leisure_score,safety_score,walkability_score,
-               computed_at,created_at,updated_at)
-            VALUES(:lid,:pid,:zone,:tr,:com,:edu,:hth,:lei,:saf,:wlk,now(),now(),now())
+              (listing_id,poi_snapshot_id,
+               lifestyle_score,family_score,mobility_score,
+               convenience_score,walkability_score,green_score,
+               created_at,updated_at)
+            VALUES(:lid,:pid,:life,:fam,:mob,:conv,:walk,:green,now(),now())
         """)
         .param("lid",lid).param("pid",pid)
-        .param("zone",zone).param("tr",transport).param("com",commerce)
-        .param("edu",education).param("hth",health).param("lei",leisure)
-        .param("saf",safety).param("wlk",walk).update();
+        .param("life",lifestyle).param("fam",family).param("mob",mobility)
+        .param("conv",convenience).param("walk",walkability).param("green",green)
+        .update();
     }
 
     private void insertVisibility(UUID id, String status) {
