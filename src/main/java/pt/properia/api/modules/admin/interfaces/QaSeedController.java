@@ -322,19 +322,16 @@ public class QaSeedController {
             INSERT INTO properia.listing_poi_snapshots
               (id,listing_id,source,radius_m,
                transport_count,supermarket_count,park_count,restaurant_count,schools_count,
-               nearest_transport_m,nearest_supermarket_m,nearest_park_m,
-               processed_at,created_at,updated_at)
+               nearest_transport_m,nearest_supermarket_m,nearest_park_m,nearest_school_m,
+               processed_at,created_at)
             VALUES(:pid,:lid,'overpass',700,
                    :metro,:supermarket,:park,:restaurant,:school,
-                   :metroM,:superM,:parkM,
-                   now(),now(),now())
+                   220,280,350,500,
+                   now(),now())
         """)
         .param("pid",poiId).param("lid",lid)
         .param("metro",metro).param("supermarket",supermarket)
         .param("park",park).param("restaurant",restaurant).param("school",school)
-        .param("metroM",metro > 0 ? 220 : null)
-        .param("superM",supermarket > 0 ? 280 : null)
-        .param("parkM",park > 0 ? 350 : null)
         .update();
     }
 
