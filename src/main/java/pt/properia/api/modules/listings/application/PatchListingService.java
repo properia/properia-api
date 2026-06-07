@@ -453,6 +453,7 @@ public class PatchListingService {
         resp.put("maintenanceCostEstimate", body.get("maintenanceCostEstimate"));
         resp.put("featureTags", body.containsKey("featureTags") ? body.get("featureTags") : List.of());
         resp.put("street", body.get("street"));
+        resp.put("municipality", body.get("municipality"));
         resp.put("locationPrecision", body.get("locationPrecision"));
         resp.put("youtubeVideoUrl", body.get("youtubeVideoUrl"));
         resp.put("virtualTourUrl", body.get("virtualTourUrl"));
