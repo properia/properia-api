@@ -67,9 +67,10 @@ public class JpaListingRepository implements ListingRepository {
                 SELECT l.id, l.public_id, l.advertiser_id, l.status::text, l.business_type::text,
                        l.property_type::text, l.title, l.price_amount, l.price_currency,
                        l.bedrooms, l.bathrooms, l.suites, l.usable_area_m2, l.gross_area_m2,
-                       l.city, l.district, l.parish, l.neighborhood, l.postal_code,
+                       l.city, l.district, COALESCE(loc.municipality, '') AS municipality,
+                       l.parish, l.neighborhood, l.postal_code,
                        COALESCE(loc.street, '') AS street,
-                       l.hero_image_url, l.energy_rating,
+                       l.hero_image_url, l.description_raw, l.energy_rating,
                        l.condition_declared::text, l.furnished_declared::text,
                        COALESCE(l.latitude, loc.latitude)   AS latitude,
                        COALESCE(l.longitude, loc.longitude) AS longitude,
@@ -100,11 +101,13 @@ public class JpaListingRepository implements ListingRepository {
                 rs.getBigDecimal("gross_area_m2"),
                 rs.getString("city"),
                 rs.getString("district"),
+                rs.getString("municipality"),
                 rs.getString("parish"),
                 rs.getString("neighborhood"),
                 rs.getString("street"),
                 rs.getString("postal_code"),
                 rs.getString("hero_image_url"),
+                rs.getString("description_raw"),
                 rs.getString("energy_rating"),
                 rs.getString("condition_declared"),
                 rs.getString("furnished_declared"),
@@ -202,9 +205,9 @@ public class JpaListingRepository implements ListingRepository {
             l.getPriceAmount(), l.getPriceCurrency(),
             l.getBedrooms(), l.getBathrooms(), l.getSuites(),
             l.getUsableAreaM2(), l.getGrossAreaM2(),
-            l.getCity(), l.getDistrict(), l.getParish(), l.getNeighborhood(),
+            l.getCity(), l.getDistrict(), null, l.getParish(), l.getNeighborhood(),
             null, l.getPostalCode(),
-            l.getHeroImageUrl(), l.getEnergyRating(),
+            l.getHeroImageUrl(), l.getDescriptionRaw(), l.getEnergyRating(),
             l.getConditionDeclared(), l.getFurnishedDeclared(),
             l.getLatitude(), l.getLongitude(),
             null, null,
@@ -282,16 +285,20 @@ public class JpaListingRepository implements ListingRepository {
         jdbc.sql("""
             INSERT INTO properia.listing_pricing
               (listing_id, list_price, rental_price, price_period, condo_fee,
-               deposit_required, negotiable, accepts_financing, updated_at)
+               deposit_required, property_tax_annual, maintenance_cost_estimate,
+               negotiable, accepts_financing, updated_at)
             VALUES
               (:listingId, :listPrice, :rentalPrice, :pricePeriod::properia.price_period,
-               :condoFee, :depositRequired, :negotiable, :acceptsFinancing, now())
+               :condoFee, :depositRequired, :propertyTaxAnnual, :maintenanceCostEstimate,
+               :negotiable, :acceptsFinancing, now())
             ON CONFLICT (listing_id) DO UPDATE SET
               list_price = EXCLUDED.list_price,
               rental_price = EXCLUDED.rental_price,
               price_period = EXCLUDED.price_period,
               condo_fee = EXCLUDED.condo_fee,
               deposit_required = EXCLUDED.deposit_required,
+              property_tax_annual = EXCLUDED.property_tax_annual,
+              maintenance_cost_estimate = EXCLUDED.maintenance_cost_estimate,
               negotiable = EXCLUDED.negotiable,
               accepts_financing = EXCLUDED.accepts_financing,
               updated_at = now()
@@ -302,6 +309,8 @@ public class JpaListingRepository implements ListingRepository {
             .param("pricePeriod", input.pricePeriod() != null ? input.pricePeriod() : "sale")
             .param("condoFee", input.condoFee())
             .param("depositRequired", input.depositRequired())
+            .param("propertyTaxAnnual", input.propertyTaxAnnual())
+            .param("maintenanceCostEstimate", input.maintenanceCostEstimate())
             .param("negotiable", input.negotiable())
             .param("acceptsFinancing", input.acceptsFinancing())
             .update();

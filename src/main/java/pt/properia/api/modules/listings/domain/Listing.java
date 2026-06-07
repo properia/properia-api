@@ -226,6 +226,9 @@ public class Listing {
     @Column(name = "hero_image_url")
     private String heroImageUrl;
 
+    @Column(name = "al_registration_number")
+    private String alRegistrationNumber;
+
     @Column(name = "visibility_status", nullable = false)
     @ColumnTransformer(write = "?::properia.visibility_status")
     private String visibilityStatus = "organic";
@@ -321,6 +324,7 @@ public class Listing {
     public boolean isHasBarbecue() { return hasBarbecue; }
     public boolean isHasLaundryArea() { return hasLaundryArea; }
     public String getHeroImageUrl() { return heroImageUrl; }
+    public String getAlRegistrationNumber() { return alRegistrationNumber; }
     public String getVisibilityStatus() { return visibilityStatus; }
     public boolean isFeatured() { return isFeatured; }
     public boolean isPremium() { return isPremium; }
@@ -393,6 +397,7 @@ public class Listing {
     public void setHasBarbecue(boolean hasBarbecue) { this.hasBarbecue = hasBarbecue; }
     public void setHasLaundryArea(boolean hasLaundryArea) { this.hasLaundryArea = hasLaundryArea; }
     public void setHeroImageUrl(String heroImageUrl) { this.heroImageUrl = heroImageUrl; }
+    public void setAlRegistrationNumber(String alRegistrationNumber) { this.alRegistrationNumber = alRegistrationNumber; }
     public void setVisibilityStatus(String visibilityStatus) { this.visibilityStatus = visibilityStatus; }
     public void setFeatured(boolean featured) { isFeatured = featured; }
     public void setPremium(boolean premium) { isPremium = premium; }

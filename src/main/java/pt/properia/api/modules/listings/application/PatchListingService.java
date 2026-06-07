@@ -84,8 +84,10 @@ public class PatchListingService {
             var pt = str(body, "propertyType");
             if (pt != null) listing.setPropertyType(pt);
         }
+        if (body.containsKey("descriptionRaw")) listing.setDescriptionRaw(str(body, "descriptionRaw"));
         if (body.containsKey("descriptionShort")) listing.setDescriptionShort(str(body, "descriptionShort"));
         if (body.containsKey("heroImageUrl")) listing.setHeroImageUrl(str(body, "heroImageUrl"));
+        if (body.containsKey("alRegistrationNumber")) listing.setAlRegistrationNumber(str(body, "alRegistrationNumber"));
         if (body.containsKey("priceAmount")) listing.setPriceAmount(decimal(body, "priceAmount"));
         if (body.containsKey("bedrooms")) listing.setBedrooms(intVal(body, "bedrooms"));
         if (body.containsKey("bathrooms")) {
@@ -203,6 +205,8 @@ public class PatchListingService {
                     pricePeriod,
                     decimal(body, "condoFee"),
                     decimal(body, "depositRequired"),
+                    decimal(body, "propertyTaxAnnual"),
+                    decimal(body, "maintenanceCostEstimate"),
                     false,
                     false
                 ),
@@ -230,6 +234,170 @@ public class PatchListingService {
                     .update();
             } catch (Exception e) {
                 // non-fatal: feature tags not critical
+            }
+        }
+
+        // ── Energy sub-entity ─────────────────────────────────────────────────
+        boolean hasEnergyFields = body.containsKey("energyCertificateNumber")
+            || body.containsKey("energyCertificateValidUntil")
+            || body.containsKey("energyCertificateExemptionReason");
+
+        if (hasEnergyFields) {
+            try {
+                var certNumber   = str(body, "energyCertificateNumber");
+                var certUntilStr = str(body, "energyCertificateValidUntil");
+                var exemption    = str(body, "energyCertificateExemptionReason");
+                var certStatus   = (exemption != null && !exemption.isBlank()) ? "exempt"
+                    : (certNumber != null || certUntilStr != null) ? "declared"
+                    : null;
+                var certUntilDate = (certUntilStr != null && !certUntilStr.isBlank())
+                    ? LocalDate.parse(certUntilStr.substring(0, 10)) : null;
+                jdbc.sql("""
+                    INSERT INTO properia.listing_energy
+                      (listing_id, energy_certificate_rating, energy_certificate_number,
+                       energy_certificate_valid_until, energy_certificate_exemption_reason,
+                       energy_certificate_status, updated_at)
+                    VALUES
+                      (:lid, :rating, :certNumber, :validUntil, :exemption, :status, now())
+                    ON CONFLICT (listing_id) DO UPDATE SET
+                      energy_certificate_rating      = EXCLUDED.energy_certificate_rating,
+                      energy_certificate_number      = EXCLUDED.energy_certificate_number,
+                      energy_certificate_valid_until = EXCLUDED.energy_certificate_valid_until,
+                      energy_certificate_exemption_reason = EXCLUDED.energy_certificate_exemption_reason,
+                      energy_certificate_status      = EXCLUDED.energy_certificate_status,
+                      updated_at = now()
+                    """)
+                    .param("lid",       saved.getId())
+                    .param("rating",    saved.getEnergyRating())
+                    .param("certNumber", certNumber)
+                    .param("validUntil", certUntilDate)
+                    .param("exemption",  exemption)
+                    .param("status",     certStatus)
+                    .update();
+            } catch (Exception e) {
+                // non-fatal
+            }
+        }
+
+        // ── Commercial URLs sub-entity (youtube / virtual tour) ───────────────
+        boolean hasCommercialUrlFields = body.containsKey("youtubeVideoUrl")
+            || body.containsKey("virtualTourUrl");
+
+        if (hasCommercialUrlFields) {
+            try {
+                jdbc.sql("""
+                    INSERT INTO properia.listing_commercial
+                      (listing_id, youtube_tour_url, virtual_tour_url, updated_at)
+                    VALUES
+                      (:lid, :youtube, :virtual, now())
+                    ON CONFLICT (listing_id) DO UPDATE SET
+                      youtube_tour_url = EXCLUDED.youtube_tour_url,
+                      virtual_tour_url = EXCLUDED.virtual_tour_url,
+                      updated_at = now()
+                    """)
+                    .param("lid",     saved.getId())
+                    .param("youtube", str(body, "youtubeVideoUrl"))
+                    .param("virtual", str(body, "virtualTourUrl"))
+                    .update();
+            } catch (Exception e) {
+                // non-fatal
+            }
+        }
+
+        // ── Room details sub-entity ───────────────────────────────────────────
+        boolean hasRoomFields = body.containsKey("roomHasPrivateBathroom")
+            || body.containsKey("roomBillsIncluded")
+            || body.containsKey("roomInternetIncluded")
+            || body.containsKey("roomHouseRulesText")
+            || body.containsKey("roomMinStayMonths");
+
+        if (hasRoomFields) {
+            try {
+                jdbc.sql("""
+                    INSERT INTO properia.listing_room_details
+                      (listing_id, has_private_bathroom, bills_included, internet_included,
+                       has_shared_kitchen, total_rooms_in_house, current_occupants,
+                       min_stay_months, couple_allowed, is_exterior_room, house_rules_text, updated_at)
+                    VALUES
+                      (:lid, :hasPrivateBathroom, :billsIncluded, :internetIncluded,
+                       :hasSharedKitchen, :totalRoomsInHouse, :currentOccupants,
+                       :minStayMonths, :coupleAllowed, :isExteriorRoom, :houseRulesText, now())
+                    ON CONFLICT (listing_id) DO UPDATE SET
+                      has_private_bathroom   = EXCLUDED.has_private_bathroom,
+                      bills_included         = EXCLUDED.bills_included,
+                      internet_included      = EXCLUDED.internet_included,
+                      has_shared_kitchen     = EXCLUDED.has_shared_kitchen,
+                      total_rooms_in_house   = EXCLUDED.total_rooms_in_house,
+                      current_occupants      = EXCLUDED.current_occupants,
+                      min_stay_months        = EXCLUDED.min_stay_months,
+                      couple_allowed         = EXCLUDED.couple_allowed,
+                      is_exterior_room       = EXCLUDED.is_exterior_room,
+                      house_rules_text       = EXCLUDED.house_rules_text,
+                      updated_at             = now()
+                    """)
+                    .param("lid",                saved.getId())
+                    .param("hasPrivateBathroom", bool(body, "roomHasPrivateBathroom"))
+                    .param("billsIncluded",      bool(body, "roomBillsIncluded"))
+                    .param("internetIncluded",   bool(body, "roomInternetIncluded"))
+                    .param("hasSharedKitchen",   bool(body, "roomHasSharedKitchen"))
+                    .param("totalRoomsInHouse",  intOrNull(body, "roomTotalRoomsInHouse"))
+                    .param("currentOccupants",   intOrNull(body, "roomCurrentOccupants"))
+                    .param("minStayMonths",      intOrNull(body, "roomMinStayMonths"))
+                    .param("coupleAllowed",      bool(body, "roomCoupleAllowed"))
+                    .param("isExteriorRoom",     bool(body, "roomIsExteriorRoom"))
+                    .param("houseRulesText",     str(body, "roomHouseRulesText"))
+                    .update();
+            } catch (Exception e) {
+                // non-fatal
+            }
+        }
+
+        // ── Commercial details sub-entity ─────────────────────────────────────
+        boolean hasCommercialDetailFields = body.containsKey("commercialHasShopfront")
+            || body.containsKey("commercialHasWc")
+            || body.containsKey("commercialStreetVisibility")
+            || body.containsKey("commercialPermittedUse")
+            || body.containsKey("commercialInternalFloors");
+
+        if (hasCommercialDetailFields) {
+            try {
+                var streetVis = str(body, "commercialStreetVisibility");
+                jdbc.sql("""
+                    INSERT INTO properia.listing_commercial_details
+                      (listing_id, has_shopfront, street_visibility, internal_floors,
+                       has_vehicle_access, permitted_use, has_flue_pipe, has_extraction_system,
+                       has_wc, has_kitchenette, has_outdoor_seating_potential, updated_at)
+                    VALUES
+                      (:lid, :hasShopfront, :streetVisibility::properia.street_visibility, :internalFloors,
+                       :hasVehicleAccess, :permittedUse, :hasFluePipe, :hasExtractionSystem,
+                       :hasWc, :hasKitchenette, :hasOutdoorSeatingPotential, now())
+                    ON CONFLICT (listing_id) DO UPDATE SET
+                      has_shopfront                  = EXCLUDED.has_shopfront,
+                      street_visibility              = EXCLUDED.street_visibility,
+                      internal_floors                = EXCLUDED.internal_floors,
+                      has_vehicle_access             = EXCLUDED.has_vehicle_access,
+                      permitted_use                  = EXCLUDED.permitted_use,
+                      has_flue_pipe                  = EXCLUDED.has_flue_pipe,
+                      has_extraction_system          = EXCLUDED.has_extraction_system,
+                      has_wc                         = EXCLUDED.has_wc,
+                      has_kitchenette                = EXCLUDED.has_kitchenette,
+                      has_outdoor_seating_potential  = EXCLUDED.has_outdoor_seating_potential,
+                      updated_at                     = now()
+                    """)
+                    .param("lid",                       saved.getId())
+                    .param("hasShopfront",              bool(body, "commercialHasShopfront"))
+                    .param("streetVisibility",          streetVis)
+                    .param("internalFloors",            intOrNull(body, "commercialInternalFloors"))
+                    .param("hasVehicleAccess",          bool(body, "commercialHasVehicleAccess"))
+                    .param("permittedUse",              str(body, "commercialPermittedUse"))
+                    .param("hasFluePipe",               bool(body, "commercialHasFluePipe"))
+                    .param("hasExtractionSystem",       bool(body, "commercialHasExtractionSystem"))
+                    .param("hasWc",                     bool(body, "commercialHasWc"))
+                    .param("hasKitchenette",            bool(body, "commercialHasKitchenette"))
+                    .param("hasOutdoorSeatingPotential", bool(body, "commercialHasOutdoorSeatingPotential"))
+                    .update();
+            } catch (Exception e) {
+                // non-fatal
             }
         }
 
@@ -277,7 +445,8 @@ public class PatchListingService {
         resp.put("updatedAt", saved.getUpdatedAt() != null ? saved.getUpdatedAt().toString() : null);
         resp.put("dataEntryAt", saved.getCreatedAt() != null ? saved.getCreatedAt().toString() : null);
         resp.put("availableFrom", saved.getAvailableFrom() != null ? saved.getAvailableFrom().toString() : null);
-        // Sub-entity fields echoed from request body
+        resp.put("alRegistrationNumber", saved.getAlRegistrationNumber());
+        // Sub-entity fields echoed from request body (saved to respective tables)
         resp.put("condoFee", body.get("condoFee"));
         resp.put("propertyTaxAnnual", body.get("propertyTaxAnnual"));
         resp.put("depositRequired", body.get("depositRequired"));
@@ -286,6 +455,7 @@ public class PatchListingService {
         resp.put("street", body.get("street"));
         resp.put("locationPrecision", body.get("locationPrecision"));
         resp.put("youtubeVideoUrl", body.get("youtubeVideoUrl"));
+        resp.put("virtualTourUrl", body.get("virtualTourUrl"));
         resp.put("energyCertificateNumber", body.get("energyCertificateNumber"));
         resp.put("energyCertificateValidUntil", body.get("energyCertificateValidUntil"));
         resp.put("energyCertificateExemptionReason", body.get("energyCertificateExemptionReason"));
@@ -319,6 +489,207 @@ public class PatchListingService {
             cd.put("hasOutdoorSeatingPotential", body.get("commercialHasOutdoorSeatingPotential"));
             resp.put("commercialDetails", cd);
         }
+
+        return resp;
+    }
+
+    // ── Read full listing for edit ────────────────────────────────────────────
+
+    public Map<String, Object> getForEdit(UUID listingId, UUID advertiserId) {
+        var l = repository.findByIdAndAdvertiserId(listingId, advertiserId)
+            .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
+
+        var resp = new LinkedHashMap<String, Object>();
+        resp.put("id", l.getId().toString());
+        resp.put("publicId", l.getPublicId());
+        resp.put("advertiserId", l.getAdvertiserId().toString());
+        resp.put("status", l.getStatus());
+        resp.put("assignedAgentId", l.getOwnerUserId() != null ? l.getOwnerUserId().toString() : null);
+        resp.put("title", l.getTitle());
+        resp.put("businessType", l.getBusinessType());
+        resp.put("propertyType", l.getPropertyType());
+        resp.put("priceAmount", l.getPriceAmount() != null ? l.getPriceAmount().toPlainString() : null);
+        resp.put("priceCurrency", l.getPriceCurrency());
+        resp.put("bedrooms", l.getBedrooms());
+        resp.put("bathrooms", l.getBathrooms() != null ? l.getBathrooms().toPlainString() : "0");
+        resp.put("suites", l.getSuites());
+        resp.put("garageSpaces", l.getGarageSpaces());
+        resp.put("parkingSpaces", l.getParkingSpaces());
+        resp.put("usableAreaM2", l.getUsableAreaM2() != null ? l.getUsableAreaM2().toPlainString() : null);
+        resp.put("grossAreaM2", l.getGrossAreaM2() != null ? l.getGrossAreaM2().toPlainString() : null);
+        resp.put("lotAreaM2", l.getLotAreaM2() != null ? l.getLotAreaM2().toPlainString() : null);
+        resp.put("floorNumber", l.getFloorNumber());
+        resp.put("totalFloors", l.getTotalFloors());
+        resp.put("constructionYear", l.getConstructionYear());
+        resp.put("renovationYear", l.getRenovationYear());
+        resp.put("energyRating", l.getEnergyRating());
+        resp.put("sunExposure", l.getSunExposure());
+        resp.put("city", l.getCity());
+        resp.put("district", l.getDistrict());
+        resp.put("parish", l.getParish());
+        resp.put("neighborhood", l.getNeighborhood());
+        resp.put("postalCode", l.getPostalCode());
+        resp.put("latitude", l.getLatitude());
+        resp.put("longitude", l.getLongitude());
+        resp.put("heroImageUrl", l.getHeroImageUrl());
+        resp.put("descriptionRaw", l.getDescriptionRaw());
+        resp.put("descriptionShort", l.getDescriptionShort());
+        resp.put("conditionStatus", l.getConditionDeclared());
+        resp.put("furnishedStatus", l.getFurnishedDeclared());
+        resp.put("isFeatured", l.isFeatured());
+        resp.put("isImmediatelyAvailable", l.isImmediatelyAvailable());
+        resp.put("visibilityStatus", l.getVisibilityStatus());
+        resp.put("publishedAt", l.getPublishedAt() != null ? l.getPublishedAt().toString() : null);
+        resp.put("updatedAt", l.getUpdatedAt() != null ? l.getUpdatedAt().toString() : null);
+        resp.put("dataEntryAt", l.getCreatedAt() != null ? l.getCreatedAt().toString() : null);
+        resp.put("availableFrom", l.getAvailableFrom() != null ? l.getAvailableFrom().toString() : null);
+        resp.put("alRegistrationNumber", l.getAlRegistrationNumber());
+
+        // Zone scores
+        jdbc.sql("""
+            SELECT zone_label_primary, zone_summary_short
+            FROM properia.listing_zone_scores WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                resp.put("zoneLabelPrimary", rs.getString("zone_label_primary"));
+                resp.put("zoneSummaryShort", rs.getString("zone_summary_short"));
+                return null;
+            }).optional().ifPresentOrElse(
+                ignored -> {},
+                () -> { resp.put("zoneLabelPrimary", null); resp.put("zoneSummaryShort", null); }
+            );
+
+        // Location sub-entity
+        jdbc.sql("""
+            SELECT COALESCE(street, '') AS street,
+                   COALESCE(location_precision::text, 'neighborhood') AS location_precision,
+                   COALESCE(municipality, '') AS municipality
+            FROM properia.listing_location WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                resp.put("street", rs.getString("street"));
+                resp.put("locationPrecision", rs.getString("location_precision"));
+                resp.put("municipality", rs.getString("municipality"));
+                return null;
+            }).optional().ifPresentOrElse(
+                ignored -> {},
+                () -> { resp.put("street", null); resp.put("locationPrecision", null); resp.put("municipality", null); }
+            );
+
+        // Pricing sub-entity
+        jdbc.sql("""
+            SELECT condo_fee, deposit_required, property_tax_annual, maintenance_cost_estimate
+            FROM properia.listing_pricing WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                var cf = rs.getBigDecimal("condo_fee");
+                var dr = rs.getBigDecimal("deposit_required");
+                var pt = rs.getBigDecimal("property_tax_annual");
+                var mc = rs.getBigDecimal("maintenance_cost_estimate");
+                resp.put("condoFee", cf != null ? cf.toPlainString() : null);
+                resp.put("depositRequired", dr != null ? dr.toPlainString() : null);
+                resp.put("propertyTaxAnnual", pt != null ? pt.toPlainString() : null);
+                resp.put("maintenanceCostEstimate", mc != null ? mc.toPlainString() : null);
+                return null;
+            }).optional().ifPresentOrElse(
+                ignored -> {},
+                () -> {
+                    resp.put("condoFee", null);
+                    resp.put("depositRequired", null);
+                    resp.put("propertyTaxAnnual", null);
+                    resp.put("maintenanceCostEstimate", null);
+                }
+            );
+
+        // Energy sub-entity
+        jdbc.sql("""
+            SELECT energy_certificate_number, energy_certificate_valid_until,
+                   energy_certificate_exemption_reason
+            FROM properia.listing_energy WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                var until = rs.getDate("energy_certificate_valid_until");
+                resp.put("energyCertificateNumber", rs.getString("energy_certificate_number"));
+                resp.put("energyCertificateValidUntil", until != null ? until.toLocalDate().toString() : null);
+                resp.put("energyCertificateExemptionReason", rs.getString("energy_certificate_exemption_reason"));
+                return null;
+            }).optional().ifPresentOrElse(
+                ignored -> {},
+                () -> {
+                    resp.put("energyCertificateNumber", null);
+                    resp.put("energyCertificateValidUntil", null);
+                    resp.put("energyCertificateExemptionReason", null);
+                }
+            );
+
+        // Features sub-entity
+        resp.put("featureTags", List.of());
+        jdbc.sql("SELECT feature_tags FROM properia.listing_features WHERE listing_id = :id")
+            .param("id", listingId)
+            .query((rs, n) -> rs.getString("feature_tags"))
+            .optional().ifPresent(raw -> {
+                try { resp.put("featureTags", json.readValue(raw, List.class)); }
+                catch (Exception ignored) {}
+            });
+
+        // Commercial sub-entity (YouTube / virtual tour)
+        jdbc.sql("""
+            SELECT youtube_tour_url, virtual_tour_url, virtual_tour_status
+            FROM properia.listing_commercial WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                resp.put("youtubeVideoUrl", rs.getString("youtube_tour_url"));
+                resp.put("virtualTourUrl", rs.getString("virtual_tour_url"));
+                resp.put("virtualTourStatus", rs.getString("virtual_tour_status"));
+                return null;
+            }).optional().ifPresentOrElse(
+                ignored -> {},
+                () -> { resp.put("youtubeVideoUrl", null); resp.put("virtualTourUrl", null); resp.put("virtualTourStatus", null); }
+            );
+
+        // Room details sub-entity
+        jdbc.sql("""
+            SELECT has_private_bathroom, bills_included, internet_included, has_shared_kitchen,
+                   total_rooms_in_house, current_occupants, min_stay_months, couple_allowed,
+                   is_exterior_room, house_rules_text
+            FROM properia.listing_room_details WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                var rd = new LinkedHashMap<String, Object>();
+                rd.put("hasPrivateBathroom", rs.getBoolean("has_private_bathroom"));
+                rd.put("billsIncluded", rs.getBoolean("bills_included"));
+                rd.put("internetIncluded", rs.getBoolean("internet_included"));
+                rd.put("hasSharedKitchen", rs.getBoolean("has_shared_kitchen"));
+                rd.put("totalRoomsInHouse", rs.getObject("total_rooms_in_house"));
+                rd.put("currentOccupants", rs.getObject("current_occupants"));
+                rd.put("minStayMonths", rs.getObject("min_stay_months"));
+                rd.put("coupleAllowed", rs.getBoolean("couple_allowed"));
+                rd.put("isExteriorRoom", rs.getBoolean("is_exterior_room"));
+                rd.put("houseRulesText", rs.getString("house_rules_text"));
+                return rd;
+            }).optional().ifPresent(rd -> resp.put("roomDetails", rd));
+
+        // Commercial details sub-entity
+        jdbc.sql("""
+            SELECT has_shopfront, street_visibility::text, internal_floors, has_vehicle_access,
+                   permitted_use, has_flue_pipe, has_extraction_system, has_wc, has_kitchenette,
+                   has_outdoor_seating_potential
+            FROM properia.listing_commercial_details WHERE listing_id = :id
+            """).param("id", listingId)
+            .query((rs, n) -> {
+                var cd = new LinkedHashMap<String, Object>();
+                cd.put("hasShopfront", rs.getBoolean("has_shopfront"));
+                cd.put("streetVisibility", rs.getString("street_visibility"));
+                cd.put("internalFloors", rs.getObject("internal_floors"));
+                cd.put("hasVehicleAccess", rs.getBoolean("has_vehicle_access"));
+                cd.put("permittedUse", rs.getString("permitted_use"));
+                cd.put("hasFluePipe", rs.getBoolean("has_flue_pipe"));
+                cd.put("hasExtractionSystem", rs.getBoolean("has_extraction_system"));
+                cd.put("hasWc", rs.getBoolean("has_wc"));
+                cd.put("hasKitchenette", rs.getBoolean("has_kitchenette"));
+                cd.put("hasOutdoorSeatingPotential", rs.getBoolean("has_outdoor_seating_potential"));
+                return cd;
+            }).optional().ifPresent(cd -> resp.put("commercialDetails", cd));
 
         return resp;
     }

@@ -32,6 +32,8 @@ public interface ListingRepository {
         String pricePeriod,
         java.math.BigDecimal condoFee,
         java.math.BigDecimal depositRequired,
+        java.math.BigDecimal propertyTaxAnnual,
+        java.math.BigDecimal maintenanceCostEstimate,
         boolean negotiable,
         boolean acceptsFinancing
     ) {}

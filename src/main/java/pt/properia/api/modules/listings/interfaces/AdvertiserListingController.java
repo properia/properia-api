@@ -54,11 +54,18 @@ public class AdvertiserListingController {
         var listing = createListingUseCase.execute(new CreateListingUseCase.Command(
             advertiserId, claims.userId(),
             req.businessType(), req.propertyType(), req.propertySubtype(),
-            req.title(), req.descriptionRaw(), req.priceAmount(),
+            req.title(), req.descriptionRaw(), req.descriptionShort(),
+            req.priceAmount(),
             req.bedrooms(), req.bathrooms(), req.suites(),
-            req.usableAreaM2(), req.grossAreaM2(),
-            req.city(), req.district(), req.parish(), req.postalCode(),
+            req.garageSpaces(), req.parkingSpaces(),
+            req.usableAreaM2(), req.grossAreaM2(), req.lotAreaM2(),
+            req.city(), req.district(), req.municipality(),
+            req.parish(), req.neighborhood(), req.street(),
+            req.postalCode(), req.latitude(), req.longitude(), req.locationPrecision(),
             req.conditionDeclared(), req.furnishedDeclared(),
+            req.energyRating(), req.energyCertificateNumber(),
+            req.energyCertificateValidUntil(), req.energyCertificateExemptionReason(),
+            req.youtubeVideoUrl(), req.alRegistrationNumber(),
             req.isFeatured()
         ));
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
@@ -97,6 +104,15 @@ public class AdvertiserListingController {
             "publicId", listing.getPublicId(),
             "status", listing.getStatus()
         )));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getDetail(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = resolveAdvertiserId(claims);
+        var result = patchListingService.getForEdit(id, advertiserId);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     @PatchMapping("/{id}")
