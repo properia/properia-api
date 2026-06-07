@@ -174,7 +174,7 @@ public class PatchListingService {
                 new ListingRepository.SaveLocationInput(
                     str(body, "city"),
                     str(body, "district"),
-                    str(body, "district"),
+                    str(body, "municipality"),
                     str(body, "parish"),
                     str(body, "neighborhood"),
                     str(body, "street"),
@@ -194,7 +194,7 @@ public class PatchListingService {
 
         if (hasPricingFields) {
             var bt = saved.getBusinessType();
-            var pricePeriod = "rent".equals(bt) || "holiday_rent".equals(bt) ? "monthly" : "sale";
+            var pricePeriod = "rent".equals(bt) || "holiday_rent".equals(bt) ? "month" : "sale";
             repository.saveSubEntities(new ListingRepository.SaveSubEntitiesInput(
                 saved.getId(),
                 new ListingRepository.SavePricingInput(
