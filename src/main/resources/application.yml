@@ -42,6 +42,13 @@ spring:
       fail-on-unknown-properties: false
     time-zone: UTC
 
+  # ── Multipart upload limits ───────────────────────────────────────────────────
+  # Mobile camera photos can be 5–15 MB. Default 1 MB limit rejects them.
+  servlet:
+    multipart:
+      max-file-size: 30MB
+      max-request-size: 35MB
+
   # ── Task execution (Virtual Threads) ─────────────────────────────────────────
   threads:
     virtual:
