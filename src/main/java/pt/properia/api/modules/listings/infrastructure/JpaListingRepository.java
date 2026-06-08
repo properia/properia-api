@@ -133,7 +133,11 @@ public class JpaListingRepository implements ListingRepository {
 
     @Override
     public Listing save(Listing listing) {
-        return listings.save(listing);
+        var saved = listings.save(listing);
+        // Flush immediately so the row is visible to JdbcClient sub-entity inserts
+        // that run in the same transaction (FK would fail otherwise).
+        listings.flush();
+        return saved;
     }
 
     @Override

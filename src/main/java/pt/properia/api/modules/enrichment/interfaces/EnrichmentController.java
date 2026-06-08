@@ -336,7 +336,7 @@ public class EnrichmentController {
                     """)
                 .param("id", UUID.randomUUID())
                 .param("type", jobType)
-                .param("eid", listingId.toString())
+                .param("eid", listingId)
                 .param("payload", "{\"listingId\":\"" + listingId + "\"}")
                 .update();
         } catch (Exception ignored) {}
