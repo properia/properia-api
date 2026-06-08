@@ -33,8 +33,27 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
 
+# ── Swagger / OpenAPI — disabled in production ────────────────────────────────
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# ── Actuator — restrict to health probe only in production ────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never        # Never leak DB / datasource details publicly
+
 properia:
   jwt:
     cookie-secure: true         # Require HTTPS in production
+  security:
+    internal-api-secret: ${INTERNAL_API_SECRET:}   # Set in prod; blocks direct API access
   fal:
-    api-key: df85460f-ca30-4dcb-8150-6faeb328cbeb:6441646964fe7728626bd2128d95e034
+    api-key: ${FAL_API_KEY:}   # REQUIRED in production — set via env var

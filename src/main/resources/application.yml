@@ -98,6 +98,11 @@ properia:
     cookie-name: properia_session
     cookie-domain: ${AUTH_COOKIE_DOMAIN:}
     cookie-secure: ${COOKIE_SECURE:false}
+  security:
+    # Shared secret between Next.js gateway and this API.
+    # When set, ALL /api/ requests must carry X-Api-Gateway-Token: <value>.
+    # Leave blank in local dev; MUST be set in production.
+    internal-api-secret: ${INTERNAL_API_SECRET:}
 
   # ── External service URLs ─────────────────────────────────────────────────
   overpass:
