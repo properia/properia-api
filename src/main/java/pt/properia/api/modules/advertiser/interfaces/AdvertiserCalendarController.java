@@ -128,7 +128,7 @@ public class AdvertiserCalendarController {
 
         if (error != null || code == null || state == null) {
             log.warn("Google OAuth callback error or missing params: error={}", error);
-            return redirect(defaultNext + "?calendar_error=access_denied");
+            return redirect(appUrl + defaultNext + "?calendar_error=access_denied");
         }
 
         String nextUrl = defaultNext;
@@ -181,11 +181,11 @@ public class AdvertiserCalendarController {
                 .update();
 
             log.info("Google Calendar connected for advertiser {} by user {}", advertiserId, userId);
-            return redirect(nextUrl + "?calendar_connected=1");
+            return redirect(appUrl + nextUrl + "?calendar_connected=1");
 
         } catch (Exception e) {
             log.error("Google Calendar OAuth callback failed", e);
-            return redirect(nextUrl + "?calendar_error=callback_failed");
+            return redirect(appUrl + nextUrl + "?calendar_error=callback_failed");
         }
     }
 
