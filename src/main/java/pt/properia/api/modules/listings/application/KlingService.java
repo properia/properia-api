@@ -15,16 +15,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Client for Kling AI v1.6 via fal.ai queue API.
- * Generates cinematic property tour videos from photos.
- * Docs: https://fal.ai/models/fal-ai/kling-video/v1.6/pro/image-to-video/api
+ * Client for Kling AI v2.1 via fal.ai queue API.
+ * Generates property showcase videos from photos using minimal camera movement.
+ *
+ * cfg_scale is kept low (0.3) so the model stays close to the source image and
+ * produces a subtle depth-parallax effect instead of panning/rotating outside
+ * the visible frame. This avoids AI hallucination of rooms or spaces that do not
+ * exist in the original photo.
+ *
+ * Docs: https://fal.ai/models/fal-ai/kling-video/v2.1/pro/image-to-video/api
  */
 @Service
 public class KlingService {
 
     private static final Logger log = LoggerFactory.getLogger(KlingService.class);
 
-    private static final String MODEL      = "fal-ai/kling-video/v1.6/pro/image-to-video";
+    private static final String MODEL      = "fal-ai/kling-video/v2.1/pro/image-to-video";
     private static final String QUEUE_BASE = "https://queue.fal.run/" + MODEL;
 
     private static final int POLL_INTERVAL_MS = 10_000; // 10s between polls
@@ -71,10 +77,12 @@ public class KlingService {
         }
 
         var body = Map.of(
-            "prompt",       buildPrompt(),
-            "image_url",    imageUrl,
-            "duration",     "5",
-            "aspect_ratio", "16:9"
+            "prompt",          buildPrompt(),
+            "negative_prompt", buildNegativePrompt(),
+            "image_url",       imageUrl,
+            "duration",        "5",
+            "aspect_ratio",    "16:9",
+            "cfg_scale",       0.3   // low motion intensity — keeps camera close to source image
         );
 
         try {
@@ -188,10 +196,21 @@ public class KlingService {
     }
 
     private String buildPrompt() {
-        return "Cinematic real estate walkthrough. Smooth professional camera movement "
-             + "gliding through a luxury property interior. "
-             + "Architectural photography style, warm natural lighting, "
-             + "slow elegant camera drift revealing the space. "
-             + "High-end property showcase video.";
+        // Goal: animate depth and atmosphere WITHIN the visible frame.
+        // "Locked off" and "static camera" instruct the model to avoid exploring
+        // areas outside the photo. "Parallax depth" gives the AI the goal of
+        // adding perceived depth without requiring new pixel invention.
+        return "Real estate photography. Locked-off static camera. "
+             + "Subtle atmospheric depth effect and gentle parallax within the visible frame. "
+             + "Soft natural lighting variation. "
+             + "Do not move the camera. Do not reveal any space outside the original photo. "
+             + "Professional architectural photography style.";
+    }
+
+    private String buildNegativePrompt() {
+        return "camera movement, panning, rotation, tilt, zoom out, dolly, tracking shot, "
+             + "new rooms, hallucination, invented spaces, areas outside original photo, "
+             + "lateral movement, forward movement, camera turning, exploring unseen areas, "
+             + "blur, distortion, low quality, artifacts";
     }
 }

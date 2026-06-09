@@ -30,6 +30,89 @@ public class FfmpegService {
         .build();
 
     /**
+     * Downloads a remote video URL to a new temp file.
+     * Caller is responsible for deleting the returned file.
+     */
+    public Path downloadToTemp(String url) throws Exception {
+        var dest = Files.createTempFile("properia-clip-", ".mp4");
+        var request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .GET()
+            .build();
+        var response = http.send(request, HttpResponse.BodyHandlers.ofFile(dest));
+        if (response.statusCode() >= 300) {
+            Files.deleteIfExists(dest);
+            throw new RuntimeException("Falha ao baixar vídeo: HTTP " + response.statusCode());
+        }
+        log.debug("Downloaded video to temp: {} bytes", Files.size(dest));
+        return dest;
+    }
+
+    /**
+     * Overlays a "Properia.pt | Gerado por IA" watermark on the bottom-right corner.
+     * Serves dual purpose: EU AI Act Art. 50 disclosure + brand protection.
+     * Non-fatal: returns the input path unchanged if FFmpeg fails.
+     * Caller is responsible for deleting the returned file.
+     */
+    public Path addWatermark(Path input) {
+        try {
+            var output = Files.createTempFile("properia-tour-wm-", ".mp4");
+            var filter = buildWatermarkFilter();
+            var cmd = List.of(
+                "ffmpeg", "-y",
+                "-i", input.toAbsolutePath().toString(),
+                "-vf", filter,
+                "-c:v", "libx264", "-crf", "22", "-preset", "fast",
+                "-c:a", "copy",
+                output.toAbsolutePath().toString()
+            );
+            log.info("Applying watermark to virtual tour");
+            var process = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            var out = new String(process.getInputStream().readAllBytes());
+            var exitCode = process.waitFor();
+            if (exitCode != 0) {
+                log.warn("ffmpeg watermark failed (exit {}): {} — using unwatermarked video",
+                    exitCode, out.substring(0, Math.min(500, out.length())));
+                Files.deleteIfExists(output);
+                return input;
+            }
+            log.info("Watermark applied: {} bytes", Files.size(output));
+            return output;
+        } catch (Exception e) {
+            log.warn("addWatermark failed: {} — using unwatermarked video", e.getMessage());
+            return input;
+        }
+    }
+
+    private String buildWatermarkFilter() {
+        var fontPath = findSystemFont();
+        var sb = new StringBuilder("drawtext=text='Properia.pt  |  Gerado por IA'");
+        if (fontPath != null) sb.append(":fontfile=").append(fontPath);
+        sb.append(":fontsize=15");
+        sb.append(":fontcolor=white@0.90");
+        sb.append(":x=w-tw-16");
+        sb.append(":y=h-th-16");
+        sb.append(":box=1");
+        sb.append(":boxcolor=black@0.45");
+        sb.append(":boxborderw=8");
+        return sb.toString();
+    }
+
+    private String findSystemFont() {
+        var candidates = List.of(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
+        );
+        return candidates.stream()
+            .filter(p -> java.nio.file.Files.exists(java.nio.file.Path.of(p)))
+            .findFirst()
+            .orElse(null);
+    }
+
+    /**
      * Downloads all clips, concatenates them, overlays background music,
      * and returns the path to the final video file.
      * Caller is responsible for deleting the returned file after use.
