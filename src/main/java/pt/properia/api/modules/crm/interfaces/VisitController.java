@@ -1,17 +1,23 @@
 package pt.properia.api.modules.crm.interfaces;
 
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
+import pt.properia.api.modules.advertiser.application.GoogleCalendarService;
 import pt.properia.api.modules.crm.application.visit.*;
 import pt.properia.api.modules.crm.interfaces.request.RequestVisitRequest;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,23 +25,30 @@ import java.util.UUID;
 @RestController
 public class VisitController {
 
+    private static final Logger log = LoggerFactory.getLogger(VisitController.class);
+    private static final DateTimeFormatter ISO_LOCAL =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss").withZone(ZoneId.of("Europe/Lisbon"));
+
     private final RequestVisitUseCase requestVisit;
     private final UpdateVisitStatusUseCase updateVisitStatus;
     private final GetVisitsUseCase getVisits;
     private final JdbcClient jdbc;
     private final AuthEmailService emailService;
+    private final GoogleCalendarService calendarService;
 
     public VisitController(
             RequestVisitUseCase requestVisit,
             UpdateVisitStatusUseCase updateVisitStatus,
             GetVisitsUseCase getVisits,
             JdbcClient jdbc,
-            AuthEmailService emailService) {
-        this.requestVisit = requestVisit;
+            AuthEmailService emailService,
+            GoogleCalendarService calendarService) {
+        this.requestVisit     = requestVisit;
         this.updateVisitStatus = updateVisitStatus;
-        this.getVisits = getVisits;
-        this.jdbc = jdbc;
-        this.emailService = emailService;
+        this.getVisits        = getVisits;
+        this.jdbc             = jdbc;
+        this.emailService     = emailService;
+        this.calendarService  = calendarService;
     }
 
     // ── Buyer: request a visit ──────────────────────────────────────────────
@@ -334,9 +347,126 @@ public class VisitController {
             @RequestBody(required = false) Map<String, String> body) {
 
         var advertiserId = requireAdvertiserId(claims);
-        var meetingUrl = body != null ? body.get("meetingUrl") : null;
+        var meetingUrl   = body != null ? body.get("meetingUrl") : null;
+
+        // Auto-create Google Meet for online visits when advertiser has an active connection
+        // and no manual meeting URL was provided
+        if (meetingUrl == null || meetingUrl.isBlank()) {
+            meetingUrl = tryCreateGoogleMeet(id, advertiserId);
+        }
+
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(id, advertiserId, "confirmed", meetingUrl));
-        return ResponseEntity.ok(Map.of("data", Map.of("confirmed", true)));
+        var response = new java.util.LinkedHashMap<String, Object>();
+        response.put("confirmed", true);
+        if (meetingUrl != null) response.put("meetingUrl", meetingUrl);
+        return ResponseEntity.ok(Map.of("data", response));
+    }
+
+    /**
+     * Attempts to create a Google Meet event for the visit.
+     * Non-fatal: returns null if the advertiser has no active connection or if the API call fails.
+     */
+    private String tryCreateGoogleMeet(UUID visitId, UUID advertiserId) {
+        try {
+            // Fetch visit details needed for the calendar event
+            var visit = jdbc.sql("""
+                    SELECT v.mode, v.starts_at, v.ends_at,
+                           l.contact_email AS buyer_email,
+                           li.title AS listing_title
+                    FROM properia.visits v
+                    LEFT JOIN properia.leads l ON l.id = v.lead_id
+                    LEFT JOIN properia.listings li ON li.id = v.listing_id
+                    WHERE v.id = :id AND v.advertiser_id = :adv
+                    """)
+                .param("id", visitId)
+                .param("adv", advertiserId)
+                .query((rs, n) -> {
+                    var m = new java.util.LinkedHashMap<String, Object>();
+                    m.put("mode",         rs.getString("mode"));
+                    m.put("startsAt",     rs.getTimestamp("starts_at"));
+                    m.put("endsAt",       rs.getTimestamp("ends_at"));
+                    m.put("buyerEmail",   rs.getString("buyer_email"));
+                    m.put("listingTitle", rs.getString("listing_title"));
+                    return m;
+                }).optional().orElse(null);
+
+            if (visit == null || !"online".equals(visit.get("mode"))) {
+                return null; // only for online visits
+            }
+
+            // Fetch active Google Calendar connection
+            var conn = jdbc.sql("""
+                    SELECT access_token_encrypted, refresh_token_encrypted, token_expires_at
+                    FROM properia.advertiser_calendar_connections
+                    WHERE advertiser_id = :adv AND provider = 'google_calendar' AND status = 'active'
+                    """)
+                .param("adv", advertiserId)
+                .query((rs, n) -> {
+                    var m = new java.util.LinkedHashMap<String, Object>();
+                    m.put("access",    rs.getString("access_token_encrypted"));
+                    m.put("refresh",   rs.getString("refresh_token_encrypted"));
+                    m.put("expiresAt", rs.getTimestamp("token_expires_at"));
+                    return m;
+                }).optional().orElse(null);
+
+            if (conn == null) {
+                return null; // no active calendar connection
+            }
+
+            // Check if access token is expired; refresh if needed
+            var accessToken = calendarService.decrypt((String) conn.get("access"));
+            if (conn.get("expiresAt") instanceof Timestamp exp && exp.toInstant().isBefore(Instant.now().plusSeconds(60))) {
+                var refreshToken = calendarService.decrypt((String) conn.get("refresh"));
+                accessToken = calendarService.refreshAccessToken(refreshToken);
+                // Persist refreshed token
+                jdbc.sql("""
+                        UPDATE properia.advertiser_calendar_connections
+                        SET access_token_encrypted = :access,
+                            token_expires_at = :expires,
+                            updated_at = now()
+                        WHERE advertiser_id = :adv AND provider = 'google_calendar'
+                        """)
+                    .param("access",  calendarService.encrypt(accessToken))
+                    .param("expires", Timestamp.from(Instant.now().plusSeconds(3600)))
+                    .param("adv",     advertiserId)
+                    .update();
+            }
+
+            var startsAt = ((Timestamp) visit.get("startsAt")).toInstant();
+            var endsAt   = visit.get("endsAt") instanceof Timestamp et
+                ? et.toInstant()
+                : startsAt.plusSeconds(3600);
+
+            var summary      = "Visita Properia — " + Optional.ofNullable((String) visit.get("listingTitle")).orElse("Imóvel");
+            var buyerEmail   = (String) visit.get("buyerEmail");
+            var startIso     = ISO_LOCAL.format(startsAt);
+            var endIso       = ISO_LOCAL.format(endsAt);
+
+            var result = calendarService.createMeetEvent(
+                accessToken, visitId.toString(), summary,
+                startIso, endIso, "Europe/Lisbon", buyerEmail);
+
+            // Store event ID for future sync/cancellation
+            jdbc.sql("""
+                    UPDATE properia.visits
+                    SET external_calendar_event_id = :evId,
+                        meeting_provider = 'google_meet'::properia.visit_meeting_provider,
+                        meeting_created_at = now(),
+                        meeting_sync_status = 'synced'::properia.visit_meeting_sync_status,
+                        updated_at = now()
+                    WHERE id = :id
+                    """)
+                .param("evId", result.calendarEventId())
+                .param("id",   visitId)
+                .update();
+
+            log.info("Auto-created Google Meet for visit {}: {}", visitId, result.meetUrl());
+            return result.meetUrl();
+
+        } catch (Exception e) {
+            log.warn("Could not auto-create Google Meet for visit {}: {}", visitId, e.getMessage());
+            return null; // non-fatal
+        }
     }
 
     @PostMapping("/api/advertiser/visitas/{id}/cancel")
