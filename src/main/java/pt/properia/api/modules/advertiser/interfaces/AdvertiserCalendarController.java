@@ -64,8 +64,9 @@ public class AdvertiserCalendarController {
     }
 
     // ── GET /api/advertiser/calendar/google/connect ────────────────────────────
-    // 302-redirects the user to the Google OAuth consent screen.
-    // ?next=<return-path> is forwarded through the OAuth state parameter.
+    // Returns the Google OAuth URL as JSON so the frontend can do
+    // window.location.href = authUrl — avoids the Next.js rewrite proxy
+    // following the 302 server-side and serving Google's HTML with our CSP.
 
     @GetMapping("/google/connect")
     public ResponseEntity<?> initiateConnect(
@@ -76,7 +77,10 @@ public class AdvertiserCalendarController {
         var advertiserId = requireAdvertiserId(claims);
 
         if (!calendarService.isConfigured()) {
-            return redirect(next + "?calendar_error=not_configured");
+            return ResponseEntity.ok(Map.of("data", Map.of(
+                "configured", false,
+                "authUrl", (Object) null
+            )));
         }
 
         try {
@@ -97,10 +101,16 @@ public class AdvertiserCalendarController {
                 + "&prompt=consent"
                 + "&state="         + enc(state);
 
-            return redirect(authUrl);
+            return ResponseEntity.ok(Map.of("data", Map.of(
+                "configured", true,
+                "authUrl", authUrl
+            )));
         } catch (Exception e) {
             log.error("Failed to build Google OAuth URL", e);
-            return redirect(next + "?calendar_error=internal");
+            return ResponseEntity.ok(Map.of("data", Map.of(
+                "configured", false,
+                "authUrl", (Object) null
+            )));
         }
     }
 
