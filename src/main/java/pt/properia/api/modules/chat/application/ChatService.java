@@ -1,5 +1,8 @@
 package pt.properia.api.modules.chat.application;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.chat.application.dto.ConversationDto;
@@ -8,31 +11,41 @@ import pt.properia.api.modules.chat.domain.ChatConversation;
 import pt.properia.api.modules.chat.domain.ChatMessage;
 import pt.properia.api.modules.chat.infrastructure.ChatConversationJpaRepository;
 import pt.properia.api.modules.chat.infrastructure.ChatMessageJpaRepository;
+import pt.properia.api.modules.crm.application.lead.CreateLeadUseCase;
 import pt.properia.api.modules.listings.infrastructure.ListingJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @Transactional
 public class ChatService {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
     private final ChatConversationJpaRepository conversationRepo;
     private final ChatMessageJpaRepository messageRepo;
     private final ListingJpaRepository listingRepo;
     private final ChatEventPublisher eventPublisher;
+    private final CreateLeadUseCase createLeadUseCase;
+    private final ObjectMapper objectMapper;
 
     public ChatService(
             ChatConversationJpaRepository conversationRepo,
             ChatMessageJpaRepository messageRepo,
             ListingJpaRepository listingRepo,
-            ChatEventPublisher eventPublisher) {
+            ChatEventPublisher eventPublisher,
+            CreateLeadUseCase createLeadUseCase,
+            ObjectMapper objectMapper) {
         this.conversationRepo = conversationRepo;
         this.messageRepo = messageRepo;
         this.listingRepo = listingRepo;
         this.eventPublisher = eventPublisher;
+        this.createLeadUseCase = createLeadUseCase;
+        this.objectMapper = objectMapper;
     }
 
     // ── Advertiser side ────────────────────────────────────────────────────────
@@ -83,6 +96,10 @@ public class ChatService {
     }
 
     public ConversationDto getOrCreateConversation(UUID listingId, UUID buyerUserId, String initialMessage) {
+        return getOrCreateConversation(listingId, buyerUserId, initialMessage, null);
+    }
+
+    public ConversationDto getOrCreateConversation(UUID listingId, UUID buyerUserId, String initialMessage, Map<String, Object> qualification) {
         var listing = listingRepo.findById(listingId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
 
@@ -96,10 +113,25 @@ public class ChatService {
             return toDto(conv, messages);
         }
 
+        // Auto-create a Lead when buyer opens a new chat conversation
+        UUID leadId = null;
+        try {
+            var intentType = resolveIntentType(listing.getBusinessType(), qualification);
+            var metadataJson = buildLeadMetadata(qualification);
+            var lead = createLeadUseCase.execute(new CreateLeadUseCase.Command(
+                listingId, buyerUserId, "chat", intentType,
+                initialMessage, null, null, null, metadataJson
+            ));
+            leadId = lead.getId();
+        } catch (Exception e) {
+            log.warn("Failed to auto-create lead for chat conversation listing={} buyer={}: {}", listingId, buyerUserId, e.getMessage());
+        }
+
         var conv = new ChatConversation();
         conv.setAdvertiserId(listing.getAdvertiserId());
         conv.setListingId(listingId);
         conv.setBuyerUserId(buyerUserId);
+        conv.setLeadId(leadId);
         conv.setLastMessageAt(Instant.now());
         conv.setLastMessagePreview(truncate(initialMessage));
         var savedConv = conversationRepo.save(conv);
@@ -112,6 +144,25 @@ public class ChatService {
         }
 
         return toDto(savedConv, firstMessage != null ? List.of(firstMessage) : List.of());
+    }
+
+    private String resolveIntentType(String businessType, Map<String, Object> q) {
+        if (q != null) {
+            var purpose = (String) q.get("purpose");
+            if ("investment".equals(purpose)) return "invest";
+            if ("rent".equals(purpose)) return "rent";
+        }
+        if ("rent".equalsIgnoreCase(businessType) || "arrendamento".equalsIgnoreCase(businessType)) return "rent";
+        return "buy";
+    }
+
+    private String buildLeadMetadata(Map<String, Object> qualification) {
+        try {
+            if (qualification == null || qualification.isEmpty()) return "{}";
+            return objectMapper.writeValueAsString(Map.of("chatQualification", qualification));
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     public MessageDto sendBuyerMessage(UUID conversationId, UUID buyerUserId, String body) {

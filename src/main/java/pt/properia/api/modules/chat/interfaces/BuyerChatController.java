@@ -120,11 +120,14 @@ public class BuyerChatController {
     @PostMapping("/conversations")
     public ResponseEntity<?> getOrCreate(
             @AuthenticationPrincipal JwtClaims claims,
-            @RequestBody Map<String, String> body) {
+            @RequestBody Map<String, Object> body) {
         requireAuth(claims);
-        var listingId = UUID.fromString(body.get("listingId"));
-        var initialMessage = body.get("initialMessage");
-        var conv = chatService.getOrCreateConversation(listingId, claims.userId(), initialMessage);
+        var listingId = UUID.fromString((String) body.get("listingId"));
+        var initialMessage = (String) body.get("initialMessage");
+        @SuppressWarnings("unchecked")
+        var qualification = body.get("qualification") instanceof Map<?,?> q
+            ? (java.util.Map<String, Object>) q : null;
+        var conv = chatService.getOrCreateConversation(listingId, claims.userId(), initialMessage, qualification);
         var result = new java.util.LinkedHashMap<String, Object>();
         result.put("conversationId", conv.id().toString());
         result.put("leadId", conv.leadId() != null ? conv.leadId().toString() : null);
