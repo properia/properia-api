@@ -264,6 +264,7 @@ public class VisitController {
         var listSql = """
                 SELECT v.id, v.lead_id, v.advertiser_id, v.listing_id, v.mode, v.status,
                        v.starts_at, v.ends_at, v.meeting_url, v.notes, v.created_at, v.updated_at,
+                       v.buyer_confirmed_at, v.buyer_confirmation_requested_at,
                        l.id AS l_id, l.contact_name, l.contact_email, l.contact_phone,
                        l.source AS l_source, l.stage AS l_stage,
                        li.id AS li_id, li.public_id AS li_public_id, li.title AS li_title,
@@ -295,6 +296,8 @@ public class VisitController {
             m.put("outcomeNotes", null);
             m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
             m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
+            m.put("buyerConfirmedAt", rs.getTimestamp("buyer_confirmed_at") != null ? rs.getTimestamp("buyer_confirmed_at").toInstant().toString() : null);
+            m.put("buyerConfirmationRequestedAt", rs.getTimestamp("buyer_confirmation_requested_at") != null ? rs.getTimestamp("buyer_confirmation_requested_at").toInstant().toString() : null);
 
             var lead = new java.util.LinkedHashMap<String, Object>();
             lead.put("id", rs.getString("l_id"));
@@ -477,6 +480,70 @@ public class VisitController {
         var advertiserId = requireAdvertiserId(claims);
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(id, advertiserId, "cancelled", null));
         return ResponseEntity.ok(Map.of("data", Map.of("cancelled", true)));
+    }
+
+    // ── Advertiser: pedir confirmação de presença ao comprador (anti-no-show) ──
+    @PostMapping("/api/advertiser/visitas/{id}/request-confirmation")
+    public ResponseEntity<?> requestBuyerConfirmation(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal JwtClaims claims) {
+
+        var advertiserId = requireAdvertiserId(claims);
+
+        // Verifica posse + estado e obtém dados para a notificação
+        var details = jdbc.sql("""
+                SELECT l.contact_email AS buyer_email, li.title AS listing_title, v.starts_at
+                  FROM properia.visits v
+                  LEFT JOIN properia.leads l ON l.id = v.lead_id
+                  LEFT JOIN properia.listings li ON li.id = v.listing_id
+                 WHERE v.id = :id AND v.advertiser_id = :adv AND v.status = 'confirmed'
+                """)
+            .param("id", id).param("adv", advertiserId)
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("buyerEmail", rs.getString("buyer_email"));
+                m.put("listingTitle", rs.getString("listing_title"));
+                m.put("startsAt", rs.getTimestamp("starts_at"));
+                return m;
+            })
+            .optional().orElse(null);
+
+        if (details == null) {
+            throw new DomainException("CONFLICT", "Só é possível pedir confirmação em visitas confirmadas.", 409);
+        }
+
+        jdbc.sql("""
+                UPDATE properia.visits
+                   SET buyer_confirmation_requested_at = now(), updated_at = now()
+                 WHERE id = :id AND advertiser_id = :adv
+                """)
+            .param("id", id).param("adv", advertiserId).update();
+
+        // Notifica o comprador por email (best-effort: não falha o pedido se o email falhar)
+        var buyerEmail = (String) details.get("buyerEmail");
+        boolean emailSent = false;
+        if (buyerEmail != null && !buyerEmail.isBlank()) {
+            try {
+                var startsAt = details.get("startsAt") instanceof Timestamp ts ? ts.toInstant() : null;
+                var whenLabel = startsAt != null
+                    ? DateTimeFormatter.ofPattern("d 'de' MMMM 'às' HH:mm", java.util.Locale.forLanguageTag("pt-PT"))
+                        .withZone(ZoneId.of("Europe/Lisbon")).format(startsAt)
+                    : "";
+                emailService.sendVisitConfirmationRequest(
+                    buyerEmail,
+                    Optional.ofNullable((String) details.get("listingTitle")).orElse("o imóvel"),
+                    whenLabel);
+                emailSent = true;
+            } catch (Exception e) {
+                log.warn("Could not send buyer confirmation email for visit {}: {}", id, e.getMessage());
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("data", Map.of(
+            "requested", true,
+            "emailSent", emailSent,
+            "buyerConfirmationRequestedAt", Instant.now().toString()
+        )));
     }
 
     // ── Advertiser: update individual visit ───────────────────────────────────

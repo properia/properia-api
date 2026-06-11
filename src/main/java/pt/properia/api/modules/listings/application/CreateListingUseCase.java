@@ -108,6 +108,21 @@ public class CreateListingUseCase {
 
         var saved = repository.save(listing);
 
+        // ── Seed do histórico de preço ─────────────────────────────────────────
+        // Regista o preço inicial como baseline para que o gráfico de evolução
+        // apareça logo na 1ª alteração (e o "desceu %" use o preço original).
+        if (cmd.priceAmount() != null) {
+            jdbc.sql("""
+                    INSERT INTO properia.listing_price_history
+                      (listing_id, price_amount, price_currency)
+                    VALUES (:lid, :price, :currency)
+                    """)
+                .param("lid", saved.getId())
+                .param("price", cmd.priceAmount())
+                .param("currency", saved.getPriceCurrency() != null ? saved.getPriceCurrency() : "EUR")
+                .update();
+        }
+
         // ── Location sub-entity ────────────────────────────────────────────────
         if (cmd.city() != null || cmd.street() != null || cmd.latitude() != null) {
             var precision = cmd.locationPrecision() != null ? cmd.locationPrecision() : "neighborhood";

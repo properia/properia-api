@@ -63,6 +63,19 @@ public class AuthEmailService {
         );
     }
 
+    public void sendVisitConfirmationRequest(String to, String listingTitle, String whenLabel) {
+        String url = appUrl + "/visitas";
+        String when = (whenLabel != null && !whenLabel.isBlank()) ? " (" + whenLabel + ")" : "";
+        send(to,
+            "Confirma a tua visita na Properia",
+            html("Confirma a tua visita",
+                "O anunciante pediu para confirmares a tua presença na visita a <strong>" + listingTitle + "</strong>" + when + ".<br><br>" +
+                "Confirma para garantires o teu lugar. Se já não puderes ir, avisa para libertar a vaga para outra pessoa.",
+                "Confirmar presença", url),
+            "Confirma a tua visita a " + listingTitle + when + ": " + url
+        );
+    }
+
     public void sendPasswordReset(String to, String token) {
         String url = appUrl + "/repor-palavra-passe?token=" + token;
         send(to,
