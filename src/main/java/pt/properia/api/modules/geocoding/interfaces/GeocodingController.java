@@ -37,19 +37,19 @@ public class GeocodingController {
         )));
     }
 
-    @PostMapping("/destination/suggestions")
-    public ResponseEntity<?> geocodeSuggestions(@RequestBody Map<String, String> body) {
-        var query = body.get("q");
-        if (query == null || query.strip().length() < 2) {
-            return ResponseEntity.ok(Map.of("data", Map.of("items", java.util.List.of())));
+    @GetMapping("/destination/suggestions")
+    public ResponseEntity<?> geocodeSuggestions(@RequestParam(value = "q", required = false) String q) {
+        if (q == null || q.strip().length() < 2) {
+            return ResponseEntity.ok(Map.of("data", Map.of("items", List.of())));
         }
 
-        var result = geocodingService.geocode(query.strip());
-        var items = result.map(r -> java.util.List.of(Map.of(
-            "label", r.label(),
-            "lat", r.lat(),
-            "lng", r.lng()
-        ))).orElse(java.util.List.of());
+        var items = geocodingService.suggest(q.strip(), 5).stream()
+            .map(r -> Map.of(
+                "label", r.label(),
+                "lat", r.lat(),
+                "lng", r.lng()
+            ))
+            .toList();
 
         return ResponseEntity.ok(Map.of("data", Map.of("items", items)));
     }

@@ -53,6 +53,29 @@ public class NominatimGeocodingService {
         }
     }
 
+    /** Returns up to {@code limit} autocomplete candidates for a free-text query. */
+    public List<GeocodingResult> suggest(String query, int limit) {
+        if (query == null || query.isBlank()) return List.of();
+        var capped = Math.max(1, Math.min(limit, 8));
+        try {
+            var arr = nominatimSearch("?q=" + enc(query.strip())
+                + "&format=jsonv2&limit=" + capped + "&countrycodes=pt&addressdetails=1");
+            if (arr.isEmpty() || !arr.get(0).isArray() || arr.get(0).isEmpty()) return List.of();
+            var node = arr.get(0);
+            var out = new ArrayList<GeocodingResult>();
+            for (int i = 0; i < Math.min(node.size(), capped); i++) {
+                var item = node.get(i);
+                double lat = item.path("lat").asDouble();
+                double lng = item.path("lon").asDouble();
+                if (lat == 0 && lng == 0) continue;
+                out.add(new GeocodingResult(item.path("display_name").asText(query), lat, lng));
+            }
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
     public List<ListingGeocodingResult> geocodeListingAddress(
             String street, String streetNumber, String postalCode,
             String city, String parish, String district) {

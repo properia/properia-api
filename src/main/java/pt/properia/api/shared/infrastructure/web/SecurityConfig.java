@@ -71,6 +71,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/local-storage/media/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/search/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/geocoding/**").permitAll()
+                // Destination resolve is a public lookup (used by anonymous commute search on home + listings)
+                .requestMatchers(HttpMethod.POST, "/api/geocoding/destination").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/locations/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
 
@@ -100,8 +102,8 @@ public class SecurityConfig {
                 // Webhooks (verified by signature, not session)
                 .requestMatchers("/api/webhooks/**").permitAll()
 
-                // Commute (public — used on listing detail)
-                .requestMatchers(HttpMethod.POST, "/api/commute/**").permitAll()
+                // Commute directions (public — used on listing card/detail route preview)
+                .requestMatchers(HttpMethod.GET, "/api/commute/**").permitAll()
 
                 // Team invitations (token-based)
                 .requestMatchers(HttpMethod.GET, "/api/convite/**").permitAll()
