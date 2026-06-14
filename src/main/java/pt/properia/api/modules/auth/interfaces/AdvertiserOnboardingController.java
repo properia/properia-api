@@ -159,6 +159,14 @@ public class AdvertiserOnboardingController {
             throw new DomainException("CONFLICT", "Já tens um anunciante associado.", 409);
         }
 
+        // Verify user exists in app_users before creating advertiser
+        boolean userExists = jdbc.sql("SELECT 1 FROM properia.app_users WHERE id = :uid LIMIT 1")
+            .param("uid", claims.userId())
+            .query((rs, n) -> true).optional().isPresent();
+        if (!userExists) {
+            throw new DomainException("USER_NOT_FOUND", "Utilizador não encontrado. Faz login novamente.", 404);
+        }
+
         var advertiserType = body.getOrDefault("advertiserType", "private_owner").toString();
         var brandName = body.containsKey("brandName") ? body.get("brandName").toString() : claims.name();
         var id = UUID.randomUUID();
