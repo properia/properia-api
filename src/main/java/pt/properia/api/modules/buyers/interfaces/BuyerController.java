@@ -30,7 +30,9 @@ public class BuyerController {
             @AuthenticationPrincipal JwtClaims claims) {
         var ctx = resolveContext(claims);
         UUID assignedTo = assignedToUserId != null ? UUID.fromString(assignedToUserId) : ctx.scopedUserId;
-        var result = buyerService.listProfiles(ctx.advertiserId, status, assignedTo, q, page, pageSize);
+        String statusFilter = (status == null || status.isBlank() || "todos".equalsIgnoreCase(status) || "all".equalsIgnoreCase(status)) ? null : status;
+        String qFilter = (q == null || q.isBlank()) ? null : q;
+        var result = buyerService.listProfiles(ctx.advertiserId, statusFilter, assignedTo, qFilter, page, pageSize);
         return ResponseEntity.ok(Map.of("data", Map.of(
             "items", result.items(),
             "total", result.total(),

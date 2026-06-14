@@ -18,9 +18,12 @@ import java.util.UUID;
 public class BuyerService {
 
     private final BuyerProfileJpaRepository repo;
+    private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
 
-    public BuyerService(BuyerProfileJpaRepository repo) {
+    public BuyerService(BuyerProfileJpaRepository repo,
+                        org.springframework.jdbc.core.simple.JdbcClient jdbc) {
         this.repo = repo;
+        this.jdbc = jdbc;
     }
 
     public record BuyerListResult(List<BuyerProfile> items, long total, int page, int pageSize, int totalPages) {}
@@ -30,9 +33,23 @@ public class BuyerService {
                                         String q, int page, int pageSize) {
         var pageable = PageRequest.of(page, pageSize, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = repo.search(advertiserId, status, assignedToUserId, q, pageable);
+        var items = result.getContent();
+        applyMatchCounts(advertiserId, items);
         return new BuyerListResult(
-            result.getContent(), result.getTotalElements(), page, pageSize, result.getTotalPages()
+            items, result.getTotalElements(), page, pageSize, result.getTotalPages()
         );
+    }
+
+    private void applyMatchCounts(UUID advertiserId, List<BuyerProfile> items) {
+        if (items.isEmpty()) return;
+        var counts = new java.util.HashMap<UUID, Integer>();
+        jdbc.sql("SELECT buyer_profile_id, COUNT(*) AS c FROM properia.buyer_listing_matches WHERE advertiser_id = :adv GROUP BY buyer_profile_id")
+            .param("adv", advertiserId)
+            .query((rs, n) -> counts.put(rs.getObject("buyer_profile_id", UUID.class), rs.getInt("c")))
+            .list();
+        for (var item : items) {
+            item.setMatchCount(counts.getOrDefault(item.getId(), 0));
+        }
     }
 
     @Transactional(readOnly = true)

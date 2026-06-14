@@ -65,7 +65,7 @@ public class JdbcSearchRepository implements SearchRepository {
               l.sun_exposure,
               l.is_immediately_available, l.available_from,
               l.published_at, l.updated_at,
-              com.floorplan_url, com.youtube_tour_url,
+              com.floorplan_url, com.youtube_tour_url, com.virtual_tour_url, com.virtual_tour_status,
               zs.zone_label_primary, zs.zone_summary_short,
               (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total,
               (SELECT COUNT(*)::int FROM properia.listing_price_history ph WHERE ph.listing_id = l.id) AS ph_change_count,
@@ -385,7 +385,10 @@ public class JdbcSearchRepository implements SearchRepository {
             rs.getString("zone_label_primary"),
             rs.getString("zone_summary_short"),
             rs.getInt("detail_views_total"),
-            buildPriceHistorySnapshot(rs)
+            buildPriceHistorySnapshot(rs),
+            rs.getString("virtual_tour_url"),
+            rs.getString("virtual_tour_status"),
+            null  // commuteSummary — preenchido por SearchListingsUseCase quando pedido
         );
     }
 

@@ -65,6 +65,7 @@ public class SecurityConfig {
                 // Public listing and search
                 .requestMatchers(HttpMethod.GET, "/api/listings/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/listings/*/view").permitAll()
+                .requestMatchers(HttpMethod.GET, "/public/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/search/**").permitAll()
 
                 // Dev local storage media serving (public so listing images render on public pages)

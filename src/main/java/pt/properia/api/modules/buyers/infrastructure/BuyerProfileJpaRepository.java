@@ -12,9 +12,9 @@ import java.util.UUID;
 public interface BuyerProfileJpaRepository extends JpaRepository<BuyerProfile, UUID> {
 
     @Query("SELECT b FROM BuyerProfile b WHERE b.advertiserId = :advertiserId " +
-           "AND (:status IS NULL OR b.status = :status) " +
+           "AND (:status IS NULL OR CAST(b.status AS string) = :status) " +
            "AND (:assignedTo IS NULL OR b.assignedToUserId = :assignedTo) " +
-           "AND (:q IS NULL OR LOWER(b.name) LIKE LOWER(CONCAT('%', :q, '%')) OR LOWER(b.email) LIKE LOWER(CONCAT('%', :q, '%')))")
+           "AND (:q IS NULL OR LOWER(b.name) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')) OR LOWER(b.email) LIKE LOWER(CONCAT('%', CAST(:q AS string), '%')))")
     Page<BuyerProfile> search(UUID advertiserId, String status, UUID assignedTo, String q, Pageable pageable);
 
     Optional<BuyerProfile> findByAdvertiserIdAndId(UUID advertiserId, UUID id);

@@ -198,8 +198,40 @@ public class JpaListingRepository implements ListingRepository {
             toFeaturesDto(feat),
             toRoomDetailsDto(room),
             toCommercialDetailsDto(comDet),
-            mediaList.stream().map(this::toMediaDto).toList()
+            mediaList.stream().map(this::toMediaDto).toList(),
+            loadVisionSummary(l.getId())
         );
+    }
+
+    private PublicListingDetailDto.VisionSummary loadVisionSummary(UUID listingId) {
+        return jdbc.sql("""
+                SELECT style_primary, style_secondary,
+                       COALESCE(ARRAY(SELECT jsonb_array_elements_text(styles_detected)), '{}') AS styles,
+                       COALESCE(ARRAY(SELECT jsonb_array_elements_text(furniture_detected)), '{}') AS furniture,
+                       COALESCE(ARRAY(SELECT jsonb_array_elements_text(signals_detected)), '{}') AS signals
+                FROM properia.listing_ai_vision
+                WHERE listing_id = :id
+                """)
+            .param("id", listingId)
+            .query((rs, n) -> new PublicListingDetailDto.VisionSummary(
+                rs.getString("style_primary"),
+                rs.getString("style_secondary"),
+                sqlArrayToList(rs.getArray("styles")),
+                sqlArrayToList(rs.getArray("furniture")),
+                sqlArrayToList(rs.getArray("signals"))
+            ))
+            .optional()
+            .orElse(null);
+    }
+
+    private static List<String> sqlArrayToList(java.sql.Array array) {
+        if (array == null) return List.of();
+        try {
+            var raw = (Object[]) array.getArray();
+            return java.util.Arrays.stream(raw).map(String::valueOf).toList();
+        } catch (java.sql.SQLException e) {
+            return List.of();
+        }
     }
 
     private ListingCardDto toCardDto(Listing l) {

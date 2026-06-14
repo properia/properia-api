@@ -94,6 +94,9 @@ public class BuyerProfile {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    @Transient
+    private Integer matchCount = 0;
+
     public BuyerProfile() {}
 
     public UUID getId() { return id; }
@@ -120,6 +123,8 @@ public class BuyerProfile {
     public String getInternalNotes() { return internalNotes; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public Integer getMatchCount() { return matchCount; }
+    public void setMatchCount(Integer matchCount) { this.matchCount = matchCount; }
 
     public void setId(UUID v) { this.id = v; }
     public void setAdvertiserId(UUID v) { this.advertiserId = v; }

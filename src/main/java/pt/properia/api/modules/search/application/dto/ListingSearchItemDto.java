@@ -75,5 +75,29 @@ public record ListingSearchItemDto(
     String zoneLabelPrimary,
     String zoneSummaryShort,
     int detailViewsTotal,
-    PriceHistorySnapshotDto priceHistorySnapshot
-) {}
+    PriceHistorySnapshotDto priceHistorySnapshot,
+    String virtualTourUrl,
+    String virtualTourStatus,
+    CommuteSummaryDto commuteSummary
+) {
+    public ListingSearchItemDto withCommuteSummary(CommuteSummaryDto cs) {
+        return new ListingSearchItemDto(
+            id, publicId, advertiserId, title, businessType, propertyType, status,
+            visibilityStatus, isFeatured, priceAmount, priceCurrency,
+            condoFee, propertyTaxAnnual, municipalTaxEstimate, depositRequired,
+            bedrooms, bathrooms, suites, garageSpaces, parkingSpaces,
+            usableAreaM2, grossAreaM2, lotAreaM2,
+            city, district, parish, neighborhood, street, postalCode, locationPrecision,
+            latitude, longitude, heroImageUrl, imageUrls, floorPlanUrl, youtubeVideoUrl,
+            descriptionShort, energyRating, conditionStatus, furnishedStatus,
+            hasGarage, hasPrivateParking, hasBalcony, hasTerrace, hasGarden,
+            hasPool, hasElevator, hasNaturalLight, hasEquippedKitchen, hasBuiltInClosets,
+            hasDoubleGlazing, hasSolarPanels, hasBarbecue, hasLaundryArea, poolType,
+            featureTags, floorNumber, totalFloors, constructionYear, renovationYear,
+            sunExposure, tipologia, isImmediatelyAvailable, availableFrom,
+            publishedAt, updatedAt, zoneLabelPrimary, zoneSummaryShort,
+            detailViewsTotal, priceHistorySnapshot, virtualTourUrl, virtualTourStatus,
+            cs
+        );
+    }
+}

@@ -77,7 +77,8 @@ public record PublicListingDetailDto(
     Features features,
     RoomDetails roomDetails,
     CommercialDetails commercialDetails,
-    List<ListingMediaDto> media
+    List<ListingMediaDto> media,
+    VisionSummary visionSummary
 ) {
     public record Pricing(
         BigDecimal listPrice,
@@ -153,5 +154,13 @@ public record PublicListingDetailDto(
         boolean hasWc,
         boolean hasKitchenette,
         boolean hasOutdoorSeatingPotential
+    ) {}
+
+    public record VisionSummary(
+        String stylePrimary,
+        String styleSecondary,
+        List<String> stylesDetected,
+        List<String> furnitureDetected,
+        List<String> signalsDetected
     ) {}
 }
