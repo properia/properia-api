@@ -2,6 +2,7 @@ package pt.properia.api.modules.auth.interfaces;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.transaction.Transactional;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -143,6 +144,7 @@ public class AdvertiserOnboardingController {
         return ResponseEntity.ok(Map.of("data", result));
     }
 
+    @Transactional
     @PostMapping("/start")
     public ResponseEntity<?> startOnboarding(@RequestBody Map<String, Object> body,
                                              @AuthenticationPrincipal JwtClaims claims) {
