@@ -45,7 +45,7 @@ public class OverpassPoiClient {
         this.props = props;
         this.json  = json;
         this.http  = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(8000))
+            .connectTimeout(Duration.ofMillis(4000))
             .build();
     }
 
