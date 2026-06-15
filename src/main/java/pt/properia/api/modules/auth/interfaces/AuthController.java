@@ -113,6 +113,28 @@ public class AuthController {
         return ResponseEntity.ok(OK);
     }
 
+    @PostMapping("/token/refresh")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request, HttpServletResponse response) {
+        var token = extractCookieValue(request, SESSION_COOKIE);
+        if (token == null) return ResponseEntity.status(401).body(Map.of("error", Map.of("code", "UNAUTHORIZED", "message", "Sessão ausente.")));
+        var claims = jwtService.validateToken(token);
+        if (claims.isEmpty()) return ResponseEntity.status(401).body(Map.of("error", Map.of("code", "UNAUTHORIZED", "message", "Sessão expirada.")));
+
+        var session = authRepository.buildSessionUser(claims.get().userId());
+        var newToken = buildTokenWithSession(session, claims.get().sessionId());
+        setSessionCookie(response, newToken);
+
+        var m = new HashMap<String, Object>();
+        m.put("sub", session.sub().toString());
+        m.put("email", session.email());
+        m.put("name", session.name());
+        m.put("role", session.role());
+        m.put("avatarUrl", session.avatarUrl() != null ? session.avatarUrl() : "");
+        m.put("hasAdvertiserAccess", session.hasAdvertiserAccess());
+        m.put("activeAdvertiserId", session.activeAdvertiserId() != null ? session.activeAdvertiserId().toString() : null);
+        return ResponseEntity.ok(Map.of("data", m));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<MeResponse> me(HttpServletRequest request) {
         var token = extractCookieValue(request, SESSION_COOKIE);
