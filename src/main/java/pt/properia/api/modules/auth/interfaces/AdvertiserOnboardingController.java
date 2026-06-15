@@ -2,14 +2,18 @@ package pt.properia.api.modules.auth.interfaces;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.transaction.Transactional;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.auth.application.AuthRepository;
 import pt.properia.api.modules.billing.application.BillingService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
+import pt.properia.api.shared.infrastructure.web.jwt.JwtProperties;
+import pt.properia.api.shared.infrastructure.web.jwt.JwtService;
 
 import java.util.*;
 
@@ -17,15 +21,26 @@ import java.util.*;
 @RequestMapping("/api/advertisers/onboarding")
 public class AdvertiserOnboardingController {
 
+    private static final String SESSION_COOKIE = "properia_session";
+
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
     private final BillingService billingService;
+    private final AuthRepository authRepository;
+    private final JwtService jwtService;
+    private final JwtProperties jwtProps;
 
     public AdvertiserOnboardingController(JdbcClient jdbc, ObjectMapper objectMapper,
-                                          BillingService billingService) {
+                                          BillingService billingService,
+                                          AuthRepository authRepository,
+                                          JwtService jwtService,
+                                          JwtProperties jwtProps) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.billingService = billingService;
+        this.authRepository = authRepository;
+        this.jwtService = jwtService;
+        this.jwtProps = jwtProps;
     }
 
     @GetMapping("/me")
@@ -147,7 +162,8 @@ public class AdvertiserOnboardingController {
     @Transactional
     @PostMapping("/start")
     public ResponseEntity<?> startOnboarding(@RequestBody Map<String, Object> body,
-                                             @AuthenticationPrincipal JwtClaims claims) {
+                                             @AuthenticationPrincipal JwtClaims claims,
+                                             HttpServletResponse response) {
         requireAuth(claims);
 
         var existing = jdbc.sql("""
@@ -210,6 +226,27 @@ public class AdvertiserOnboardingController {
         }
 
         var result = loadOnboarding(claims.userId());
+
+        // Refresh JWT cookie so hasAdvertiserAccess reflects the new state immediately
+        try {
+            var session = authRepository.buildSessionUser(claims.userId());
+            var newToken = jwtService.generateToken(new JwtClaims(
+                session.sub(), session.email(), session.name(), session.role(),
+                session.avatarUrl(), session.hasAdvertiserAccess(),
+                session.activeAdvertiserId(), claims.sessionId()
+            ));
+            response.addHeader("Set-Cookie",
+                SESSION_COOKIE + "=" + newToken
+                    + "; Path=/"
+                    + "; HttpOnly"
+                    + (jwtProps.isCookieSecure() ? "; Secure" : "")
+                    + "; SameSite=Lax"
+                    + "; Max-Age=" + jwtProps.getTtlSeconds()
+                    + (jwtProps.getCookieDomain() != null && !jwtProps.getCookieDomain().isBlank()
+                        ? "; Domain=" + jwtProps.getCookieDomain() : "")
+            );
+        } catch (Exception ignored) {}
+
         return ResponseEntity.status(201).body(Map.of("data", result));
     }
 
