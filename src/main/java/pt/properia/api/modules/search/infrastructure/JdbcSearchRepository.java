@@ -31,9 +31,6 @@ public class JdbcSearchRepository implements SearchRepository {
         var orderBy = buildOrderBy(params.sort());
         int offset = (params.page() - 1) * params.pageSize();
 
-        // COUNT(*) OVER () avoids a second round-trip to the DB for pagination total.
-        // Correlated subqueries replaced by aggregated lateral joins (one scan per table,
-        // not one scan per row) — critical at scale when pageSize=24+.
         var sql = """
             SELECT
               l.id, l.public_id, l.advertiser_id, l.title,
@@ -73,8 +70,7 @@ public class JdbcSearchRepository implements SearchRepository {
               COALESCE(dv_agg.view_count, 0)      AS detail_views_total,
               COALESCE(ph_agg.change_count, 0)     AS ph_change_count,
               ph_agg.first_price                   AS ph_first_price,
-              ph_agg.last_change_at                AS ph_last_change_at,
-              COUNT(*) OVER ()                     AS total_count
+              ph_agg.last_change_at                AS ph_last_change_at
             FROM properia.listings l
             LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id
             LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
@@ -114,13 +110,9 @@ public class JdbcSearchRepository implements SearchRepository {
         }
         query = query.param("limit", params.pageSize()).param("offset", offset);
 
-        long[] totalHolder = {0};
-        var items = query.query((rs, rowNum) -> {
-            if (rowNum == 0) totalHolder[0] = rs.getLong("total_count");
-            return mapRow(rs);
-        }).list();
+        var items = query.query((rs, rowNum) -> mapRow(rs)).list();
 
-        long total = totalHolder[0];
+        long total = count(params);
         int totalPages = (int) Math.ceil((double) total / params.pageSize());
 
         return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages);
