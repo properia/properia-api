@@ -21,6 +21,54 @@ public class SearchController {
         this.jdbc = jdbc;
     }
 
+    // TEMPORARY diagnostic endpoint 5 — EXPLAIN ANALYZE + column group tests
+    @GetMapping("/listings/diag5")
+    public ResponseEntity<?> diag5() {
+        var r = new java.util.LinkedHashMap<String, Object>();
+
+        var ids = jdbc.sql("SELECT l.id::text FROM properia.listings l WHERE l.status = 'published' ORDER BY l.published_at DESC NULLS LAST LIMIT 6 OFFSET 0")
+            .query(String.class).list();
+        if (ids.isEmpty()) { r.put("no_results", true); return ResponseEntity.ok(r); }
+        var lit = ids.stream().map(id -> "'" + id + "'").collect(java.util.stream.Collectors.joining(","));
+
+        var joins = " FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id"
+            + " LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT (ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC))[1] AS cover_url, ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true";
+
+        // 1: only lateral outputs (no simple columns)
+        time(r, "t1_only_lateral_outputs",
+            "SELECT l.id::text, lm.image_urls_arr, lm.cover_url, dv_agg.view_count, ph_agg.change_count, ph_agg.first_price, ph_agg.last_change_at"
+            + joins + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC");
+
+        // 2: only simple string/int columns from l (no laterals in SELECT)
+        time(r, "t2_only_simple_l_columns",
+            "SELECT l.id::text, l.title, l.city, l.district, l.status, l.business_type, l.property_type, l.bedrooms, l.price_amount, l.is_featured, l.published_at, l.updated_at"
+            + joins + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC");
+
+        // 3: full 50-column SELECT with WHERE 1=0 (no rows → tests planning time only)
+        time(r, "t3_fullselect_where_false",
+            "SELECT l.id, l.public_id, l.advertiser_id, l.title, l.business_type, l.property_type, l.status, l.visibility_status, l.is_featured, l.price_amount, l.price_currency, p.condo_fee, p.property_tax_annual, p.municipal_tax_estimate, p.deposit_required, l.bedrooms, l.bathrooms, l.suites, l.garage_spaces, l.parking_spaces, l.usable_area_m2, l.gross_area_m2, l.lot_area_m2, l.city, l.district, l.parish, l.neighborhood, loc.street, l.postal_code, loc.location_precision, COALESCE(l.latitude, loc.latitude) AS latitude, COALESCE(l.longitude, loc.longitude) AS longitude, COALESCE(l.hero_image_url, lm.cover_url) AS hero_image_url, lm.image_urls_arr, l.description_short, l.energy_rating, l.condition_final, l.furnished_final, l.has_garage, l.has_private_parking, l.has_balcony, l.has_terrace, l.has_garden, l.has_pool, l.has_elevator, l.has_natural_light, l.has_equipped_kitchen, l.has_built_in_closets, l.has_double_glazing, l.has_solar_panels, l.has_barbecue, l.has_laundry_area, l.pool_type, lf.feature_tags, l.floor_number, l.total_floors, l.construction_year, l.renovation_year, l.sun_exposure, l.is_immediately_available, l.available_from, l.published_at, l.updated_at, com.floorplan_url, com.youtube_tour_url, com.virtual_tour_url, com.virtual_tour_status, zs.zone_label_primary, zs.zone_summary_short, COALESCE(dv_agg.view_count, 0) AS detail_views_total, COALESCE(ph_agg.change_count, 0) AS ph_change_count, ph_agg.first_price AS ph_first_price, ph_agg.last_change_at AS ph_last_change_at"
+            + joins + " WHERE 1=0");
+
+        // 4: EXPLAIN (no analyze, fast) on full Phase2 query
+        try {
+            var explainSql = "EXPLAIN SELECT l.id, l.public_id, l.advertiser_id, l.title, l.business_type, l.property_type, l.status, l.visibility_status, l.is_featured, l.price_amount, l.price_currency, p.condo_fee, p.property_tax_annual, p.municipal_tax_estimate, p.deposit_required, l.bedrooms, l.bathrooms, l.suites, l.garage_spaces, l.parking_spaces, l.usable_area_m2, l.gross_area_m2, l.lot_area_m2, l.city, l.district, l.parish, l.neighborhood, loc.street, l.postal_code, loc.location_precision, COALESCE(l.latitude, loc.latitude) AS latitude, COALESCE(l.longitude, loc.longitude) AS longitude, COALESCE(l.hero_image_url, lm.cover_url) AS hero_image_url, lm.image_urls_arr, l.description_short, l.energy_rating, l.condition_final, l.furnished_final, l.has_garage, l.has_private_parking, l.has_balcony, l.has_terrace, l.has_garden, l.has_pool, l.has_elevator, l.has_natural_light, l.has_equipped_kitchen, l.has_built_in_closets, l.has_double_glazing, l.has_solar_panels, l.has_barbecue, l.has_laundry_area, l.pool_type, lf.feature_tags, l.floor_number, l.total_floors, l.construction_year, l.renovation_year, l.sun_exposure, l.is_immediately_available, l.available_from, l.published_at, l.updated_at, com.floorplan_url, com.youtube_tour_url, com.virtual_tour_url, com.virtual_tour_status, zs.zone_label_primary, zs.zone_summary_short, COALESCE(dv_agg.view_count, 0) AS detail_views_total, COALESCE(ph_agg.change_count, 0) AS ph_change_count, ph_agg.first_price AS ph_first_price, ph_agg.last_change_at AS ph_last_change_at"
+                + joins + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC";
+            var plan = jdbc.sql(explainSql).query((rs, n) -> rs.getString(1)).list();
+            r.put("explain_plan", plan);
+        } catch (Exception e) {
+            r.put("explain_error", e.getMessage());
+        }
+
+        return ResponseEntity.ok(r);
+    }
+
     // TEMPORARY diagnostic endpoint 4 — isolates which JOIN/clause makes Phase2 slow
     @GetMapping("/listings/diag4")
     public ResponseEntity<?> diag4() {
