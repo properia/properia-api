@@ -21,6 +21,101 @@ public class SearchController {
         this.jdbc = jdbc;
     }
 
+    // TEMPORARY diagnostic endpoint 4 — isolates which JOIN/clause makes Phase2 slow
+    @GetMapping("/listings/diag4")
+    public ResponseEntity<?> diag4() {
+        var r = new java.util.LinkedHashMap<String, Object>();
+
+        var ids = jdbc.sql("SELECT l.id::text FROM properia.listings l WHERE l.status = 'published' ORDER BY l.published_at DESC NULLS LAST LIMIT 6 OFFSET 0")
+            .query(String.class).list();
+        if (ids.isEmpty()) { r.put("no_results", true); return ResponseEntity.ok(r); }
+        var lit = ids.stream().map(id -> "'" + id + "'").collect(java.util.stream.Collectors.joining(","));
+
+        // Base: same as diag2 phase2f but full SELECT (no listing_features, no listing_commercial, no ORDER BY)
+        time(r, "t1_base_nofeatures_nocommercial_noorder",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ")");
+
+        // + ORDER BY
+        time(r, "t2_add_orderby",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC");
+
+        // + listing_features (sem ORDER BY)
+        time(r, "t3_add_features_noorder",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ")");
+
+        // + listing_commercial (sem ORDER BY)
+        time(r, "t4_add_commercial_noorder",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ")");
+
+        // + both features+commercial (sem ORDER BY)
+        time(r, "t5_features_commercial_noorder",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id"
+            + " LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ")");
+
+        // full (features + commercial + ORDER BY) — should be 12s if this is the problem
+        time(r, "t6_full_features_commercial_order",
+            "SELECT l.id::text FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id"
+            + " LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC");
+
+        return ResponseEntity.ok(r);
+    }
+
+    private void time(java.util.Map<String, Object> r, String label, String sql) {
+        long t = System.currentTimeMillis();
+        try {
+            jdbc.sql(sql).query((rs, n) -> rs.getString(1)).list();
+        } catch (Exception e) {
+            r.put(label + "_error", e.getMessage());
+        }
+        r.put(label + "_ms", System.currentTimeMillis() - t);
+    }
+
     // TEMPORARY diagnostic endpoint 3 — times each rs.getXxx() group inside full mapRow
     @GetMapping("/listings/diag3")
     public ResponseEntity<?> diag3() throws java.sql.SQLException {
