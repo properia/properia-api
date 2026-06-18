@@ -35,7 +35,33 @@ public class JdbcSearchRepository implements SearchRepository {
         var orderBy = buildOrderBy(params.sort());
         int offset = (params.page() - 1) * params.pageSize();
 
-        var sql = """
+        // Phase 1: cheap ID-only query — no joins, no laterals, uses index for ORDER BY + LIMIT.
+        // This prevents PostgreSQL from running the expensive lateral subqueries on ALL matching
+        // rows before applying LIMIT (a common planner mistake on small tables without statistics).
+        var idSql = "SELECT l.id FROM properia.listings l " + where.sql()
+            + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset";
+
+        var idQuery = jdbc.sql(idSql);
+        for (var e : where.params().entrySet()) {
+            idQuery = idQuery.param(e.getKey(), e.getValue());
+        }
+        idQuery = idQuery.param("limit", params.pageSize()).param("offset", offset);
+
+        long t0 = System.currentTimeMillis();
+        var ids = idQuery.query(String.class).list();
+        long t1 = System.currentTimeMillis();
+
+        if (ids.isEmpty()) {
+            long total = count(params);
+            long t2 = System.currentTimeMillis();
+            log.info("search sort={} size={} → idQuery={}ms count={}ms items=0",
+                params.sort(), params.pageSize(), (t1 - t0), (t2 - t1));
+            int totalPages = (int) Math.ceil((double) total / params.pageSize());
+            return new SearchResultDto(List.of(), total, params.page(), params.pageSize(), totalPages);
+        }
+
+        // Phase 2: fetch full details only for the page rows (at most pageSize rows).
+        var detailSql = """
             SELECT
               l.id, l.public_id, l.advertiser_id, l.title,
               l.business_type, l.property_type, l.status,
@@ -106,26 +132,24 @@ public class JdbcSearchRepository implements SearchRepository {
                 FROM properia.listing_price_history
                 WHERE listing_id = l.id
             ) ph_agg ON true
-            """ + where.sql() + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset\n";
+            WHERE l.id IN (:ids)
+            ORDER BY """ + orderBy;
 
-        var query = jdbc.sql(sql);
-        for (var e : where.params().entrySet()) {
-            query = query.param(e.getKey(), e.getValue());
-        }
-        query = query.param("limit", params.pageSize()).param("offset", offset);
-
-        long t0 = System.currentTimeMillis();
-        var items = query.query((rs, rowNum) -> mapRow(rs)).list();
-        long t1 = System.currentTimeMillis();
+        var uuids = ids.stream().map(UUID::fromString).toList();
+        long t2 = System.currentTimeMillis();
+        var items = jdbc.sql(detailSql)
+            .param("ids", uuids)
+            .query((rs, rowNum) -> mapRow(rs))
+            .list();
+        long t3 = System.currentTimeMillis();
 
         long total = count(params);
-        long t2 = System.currentTimeMillis();
+        long t4 = System.currentTimeMillis();
 
-        log.info("search sort={} page={} size={} → mainQuery={}ms count={}ms total={}ms items={}",
-            params.sort(), params.page(), params.pageSize(), (t1 - t0), (t2 - t1), (t2 - t0), items.size());
+        log.info("search sort={} size={} → idQuery={}ms detail={}ms count={}ms total={}ms items={}",
+            params.sort(), params.pageSize(), (t1 - t0), (t3 - t2), (t4 - t3), (t4 - t0), items.size());
 
         int totalPages = (int) Math.ceil((double) total / params.pageSize());
-
         return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages);
     }
 
