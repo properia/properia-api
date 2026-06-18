@@ -1,5 +1,7 @@
 package pt.properia.api.modules.search.infrastructure;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import pt.properia.api.modules.search.application.SearchRepository;
@@ -18,6 +20,8 @@ import java.util.UUID;
 
 @Repository
 public class JdbcSearchRepository implements SearchRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcSearchRepository.class);
 
     private final JdbcClient jdbc;
 
@@ -110,9 +114,16 @@ public class JdbcSearchRepository implements SearchRepository {
         }
         query = query.param("limit", params.pageSize()).param("offset", offset);
 
+        long t0 = System.currentTimeMillis();
         var items = query.query((rs, rowNum) -> mapRow(rs)).list();
+        long t1 = System.currentTimeMillis();
 
         long total = count(params);
+        long t2 = System.currentTimeMillis();
+
+        log.info("search sort={} page={} size={} → mainQuery={}ms count={}ms total={}ms items={}",
+            params.sort(), params.page(), params.pageSize(), (t1 - t0), (t2 - t1), (t2 - t0), items.size());
+
         int totalPages = (int) Math.ceil((double) total / params.pageSize());
 
         return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages);
