@@ -21,6 +21,115 @@ public class SearchController {
         this.jdbc = jdbc;
     }
 
+    // TEMPORARY diagnostic endpoint 3 — times each rs.getXxx() group inside full mapRow
+    @GetMapping("/listings/diag3")
+    public ResponseEntity<?> diag3() throws java.sql.SQLException {
+        var r = new java.util.LinkedHashMap<String, Object>();
+        long t;
+
+        t = System.currentTimeMillis();
+        var ids = jdbc.sql("SELECT l.id::text FROM properia.listings l WHERE l.status = 'published' ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC LIMIT 6 OFFSET 0")
+            .query(String.class).list();
+        r.put("p1_ids_ms", System.currentTimeMillis() - t);
+
+        if (ids.isEmpty()) { r.put("no_results", true); return ResponseEntity.ok(r); }
+
+        var lit = ids.stream().map(id -> "'" + id + "'").collect(java.util.stream.Collectors.joining(","));
+
+        var detailSql = "SELECT l.id, l.public_id, l.advertiser_id, l.title, l.business_type, l.property_type, l.status, l.visibility_status, l.is_featured, l.price_amount, l.price_currency, p.condo_fee, p.property_tax_annual, p.municipal_tax_estimate, p.deposit_required, l.bedrooms, l.bathrooms, l.suites, l.garage_spaces, l.parking_spaces, l.usable_area_m2, l.gross_area_m2, l.lot_area_m2, l.city, l.district, l.parish, l.neighborhood, loc.street, l.postal_code, loc.location_precision, COALESCE(l.latitude, loc.latitude) AS latitude, COALESCE(l.longitude, loc.longitude) AS longitude, COALESCE(l.hero_image_url, lm.cover_url) AS hero_image_url, lm.image_urls_arr, l.description_short, l.energy_rating, l.condition_final, l.furnished_final, l.has_garage, l.has_private_parking, l.has_balcony, l.has_terrace, l.has_garden, l.has_pool, l.has_elevator, l.has_natural_light, l.has_equipped_kitchen, l.has_built_in_closets, l.has_double_glazing, l.has_solar_panels, l.has_barbecue, l.has_laundry_area, l.pool_type, lf.feature_tags, l.floor_number, l.total_floors, l.construction_year, l.renovation_year, l.sun_exposure, l.is_immediately_available, l.available_from, l.published_at, l.updated_at, com.floorplan_url, com.youtube_tour_url, com.virtual_tour_url, com.virtual_tour_status, zs.zone_label_primary, zs.zone_summary_short, COALESCE(dv_agg.view_count, 0) AS detail_views_total, COALESCE(ph_agg.change_count, 0) AS ph_change_count, ph_agg.first_price AS ph_first_price, ph_agg.last_change_at AS ph_last_change_at"
+            + " FROM properia.listings l"
+            + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+            + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+            + " LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id"
+            + " LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id"
+            + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+            + " LEFT JOIN LATERAL (SELECT (ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC))[1] AS cover_url, ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+            + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+            + " WHERE l.id::text IN (" + lit + ") ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC";
+
+        var grp = new java.util.LinkedHashMap<String, Long>();
+
+        t = System.currentTimeMillis();
+        jdbc.sql(detailSql).query((rs, rowNum) -> {
+            long tA = System.currentTimeMillis();
+            rs.getString("id"); rs.getString("public_id"); rs.getString("advertiser_id");
+            rs.getString("title"); rs.getString("business_type"); rs.getString("property_type");
+            rs.getString("status"); rs.getString("visibility_status");
+            grp.merge("A_getstring_ids", System.currentTimeMillis() - tA, Long::sum);
+
+            long tB = System.currentTimeMillis();
+            rs.getBoolean("is_featured");
+            rs.getBigDecimal("price_amount"); rs.getString("price_currency");
+            rs.getBigDecimal("condo_fee"); rs.getBigDecimal("property_tax_annual");
+            rs.getBigDecimal("municipal_tax_estimate"); rs.getBigDecimal("deposit_required");
+            grp.merge("B_bool_bigdec", System.currentTimeMillis() - tB, Long::sum);
+
+            long tC = System.currentTimeMillis();
+            rs.getInt("bedrooms"); rs.getBigDecimal("bathrooms"); rs.getInt("suites");
+            rs.getObject("garage_spaces"); rs.getObject("parking_spaces");
+            rs.getBigDecimal("usable_area_m2"); rs.getBigDecimal("gross_area_m2"); rs.getBigDecimal("lot_area_m2");
+            grp.merge("C_ints_areas", System.currentTimeMillis() - tC, Long::sum);
+
+            long tD = System.currentTimeMillis();
+            rs.getString("city"); rs.getString("district"); rs.getString("parish");
+            rs.getString("neighborhood"); rs.getString("street"); rs.getString("postal_code");
+            rs.getString("location_precision");
+            rs.getObject("latitude"); rs.getObject("longitude");
+            grp.merge("D_location_geo", System.currentTimeMillis() - tD, Long::sum);
+
+            long tE = System.currentTimeMillis();
+            rs.getString("hero_image_url"); rs.getString("image_urls_arr");
+            rs.getString("description_short"); rs.getString("energy_rating");
+            rs.getString("condition_final"); rs.getString("furnished_final");
+            grp.merge("E_image_desc", System.currentTimeMillis() - tE, Long::sum);
+
+            long tF = System.currentTimeMillis();
+            rs.getBoolean("has_garage"); rs.getBoolean("has_private_parking");
+            rs.getBoolean("has_balcony"); rs.getBoolean("has_terrace"); rs.getBoolean("has_garden");
+            rs.getBoolean("has_pool"); rs.getBoolean("has_elevator"); rs.getBoolean("has_natural_light");
+            rs.getBoolean("has_equipped_kitchen"); rs.getBoolean("has_built_in_closets");
+            rs.getBoolean("has_double_glazing"); rs.getBoolean("has_solar_panels");
+            rs.getBoolean("has_barbecue"); rs.getBoolean("has_laundry_area");
+            grp.merge("F_has_booleans", System.currentTimeMillis() - tF, Long::sum);
+
+            long tG = System.currentTimeMillis();
+            rs.getString("pool_type"); rs.getString("feature_tags");
+            rs.getObject("floor_number"); rs.getObject("total_floors");
+            rs.getObject("construction_year"); rs.getObject("renovation_year");
+            rs.getString("sun_exposure"); rs.getBoolean("is_immediately_available");
+            rs.getString("available_from");
+            grp.merge("G_misc", System.currentTimeMillis() - tG, Long::sum);
+
+            long tH = System.currentTimeMillis();
+            rs.getTimestamp("published_at");
+            rs.getTimestamp("updated_at");
+            grp.merge("H_timestamps", System.currentTimeMillis() - tH, Long::sum);
+
+            long tI = System.currentTimeMillis();
+            rs.getString("floorplan_url"); rs.getString("youtube_tour_url");
+            rs.getString("virtual_tour_url"); rs.getString("virtual_tour_status");
+            rs.getString("zone_label_primary"); rs.getString("zone_summary_short");
+            rs.getInt("detail_views_total");
+            grp.merge("I_commercial_zone", System.currentTimeMillis() - tI, Long::sum);
+
+            long tJ = System.currentTimeMillis();
+            int chg = rs.getInt("ph_change_count");
+            if (chg > 0) { rs.getObject("ph_first_price"); rs.getBigDecimal("price_amount"); rs.getTimestamp("ph_last_change_at"); }
+            grp.merge("J_price_history", System.currentTimeMillis() - tJ, Long::sum);
+
+            return rowNum;
+        }).list();
+        r.put("p2_total_ms", System.currentTimeMillis() - t);
+        r.put("p2_breakdown", grp);
+
+        t = System.currentTimeMillis();
+        jdbc.sql("SELECT COUNT(*) FROM properia.listings l WHERE l.status = 'published'").query(Long.class).single();
+        r.put("p3_count_ms", System.currentTimeMillis() - t);
+
+        return ResponseEntity.ok(r);
+    }
+
     // TEMPORARY diagnostic endpoint 2 — simulates full search() step by step
     @GetMapping("/listings/diag2")
     public ResponseEntity<?> diag2() {
