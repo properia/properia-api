@@ -38,7 +38,7 @@ public class JdbcSearchRepository implements SearchRepository {
         // Phase 1: cheap ID-only query — no joins, no laterals, uses index for ORDER BY + LIMIT.
         // This prevents PostgreSQL from running the expensive lateral subqueries on ALL matching
         // rows before applying LIMIT (a common planner mistake on small tables without statistics).
-        var idSql = "SELECT l.id FROM properia.listings l " + where.sql()
+        var idSql = "SELECT l.id::text AS id FROM properia.listings l " + where.sql()
             + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset";
 
         var idQuery = jdbc.sql(idSql);
@@ -132,13 +132,12 @@ public class JdbcSearchRepository implements SearchRepository {
                 FROM properia.listing_price_history
                 WHERE listing_id = l.id
             ) ph_agg ON true
-            WHERE l.id IN (:ids)
+            WHERE l.id::text IN (:ids)
             ORDER BY """ + orderBy;
 
-        var uuids = ids.stream().map(UUID::fromString).toList();
         long t2 = System.currentTimeMillis();
         var items = jdbc.sql(detailSql)
-            .param("ids", uuids)
+            .param("ids", ids)
             .query((rs, rowNum) -> mapRow(rs))
             .list();
         long t3 = System.currentTimeMillis();
