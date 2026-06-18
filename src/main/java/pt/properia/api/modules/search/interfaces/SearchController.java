@@ -1,6 +1,7 @@
 package pt.properia.api.modules.search.interfaces;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.search.application.SearchListingsUseCase;
 import pt.properia.api.modules.search.application.dto.SearchParams;
@@ -13,9 +14,71 @@ import java.util.Map;
 public class SearchController {
 
     private final SearchListingsUseCase useCase;
+    private final JdbcClient jdbc;
 
-    public SearchController(SearchListingsUseCase useCase) {
+    public SearchController(SearchListingsUseCase useCase, JdbcClient jdbc) {
         this.useCase = useCase;
+        this.jdbc = jdbc;
+    }
+
+    // TEMPORARY diagnostic endpoint — remove after root cause is identified
+    @GetMapping("/listings/diag")
+    public ResponseEntity<?> diag() {
+        var results = new java.util.LinkedHashMap<String, Object>();
+
+        // Step 1: bare connection ping
+        long t = System.currentTimeMillis();
+        jdbc.sql("SELECT 1").query(Integer.class).single();
+        results.put("ping_ms", System.currentTimeMillis() - t);
+
+        // Step 2: count published (no ORDER BY, no LIMIT)
+        t = System.currentTimeMillis();
+        long cnt = jdbc.sql("SELECT COUNT(*) FROM properia.listings WHERE status = 'published'")
+            .query(Long.class).single();
+        results.put("count_published_ms", System.currentTimeMillis() - t);
+        results.put("count_published", cnt);
+
+        // Step 3: select id (no ORDER BY, no LIMIT)
+        t = System.currentTimeMillis();
+        var ids1 = jdbc.sql("SELECT id::text FROM properia.listings WHERE status = 'published'")
+            .query(String.class).list();
+        results.put("select_ids_no_order_ms", System.currentTimeMillis() - t);
+        results.put("ids_count", ids1.size());
+
+        // Step 4: select id with ORDER BY (no LIMIT)
+        t = System.currentTimeMillis();
+        var ids2 = jdbc.sql("SELECT id::text FROM properia.listings WHERE status = 'published' ORDER BY published_at DESC NULLS LAST")
+            .query(String.class).list();
+        results.put("select_ids_with_order_ms", System.currentTimeMillis() - t);
+
+        // Step 5: select id with ORDER BY + LIMIT (literal)
+        t = System.currentTimeMillis();
+        var ids3 = jdbc.sql("SELECT id::text FROM properia.listings WHERE status = 'published' ORDER BY published_at DESC NULLS LAST LIMIT 24 OFFSET 0")
+            .query(String.class).list();
+        results.put("select_ids_order_limit_literal_ms", System.currentTimeMillis() - t);
+
+        // Step 6: select id with ORDER BY + LIMIT (named param)
+        t = System.currentTimeMillis();
+        var ids4 = jdbc.sql("SELECT id::text FROM properia.listings WHERE status = 'published' ORDER BY published_at DESC NULLS LAST LIMIT :lim OFFSET :off")
+            .param("lim", 24).param("off", 0)
+            .query(String.class).list();
+        results.put("select_ids_order_limit_param_ms", System.currentTimeMillis() - t);
+
+        // Step 7: count listing_detail_views (check table size)
+        t = System.currentTimeMillis();
+        long dvCount = jdbc.sql("SELECT COUNT(*) FROM properia.listing_detail_views")
+            .query(Long.class).single();
+        results.put("listing_detail_views_total_ms", System.currentTimeMillis() - t);
+        results.put("listing_detail_views_count", dvCount);
+
+        // Step 8: count listing_media (check table size)
+        t = System.currentTimeMillis();
+        long mediaCount = jdbc.sql("SELECT COUNT(*) FROM properia.listing_media")
+            .query(Long.class).single();
+        results.put("listing_media_total_ms", System.currentTimeMillis() - t);
+        results.put("listing_media_count", mediaCount);
+
+        return ResponseEntity.ok(results);
     }
 
     @GetMapping("/listings")
