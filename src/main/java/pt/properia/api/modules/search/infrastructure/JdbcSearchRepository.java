@@ -114,7 +114,7 @@ public class JdbcSearchRepository implements SearchRepository {
             LEFT JOIN LATERAL (
                 SELECT
                     (ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC))[1] AS cover_url,
-                    ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC) AS image_urls_arr
+                    ARRAY_TO_STRING(ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC), '|') AS image_urls_arr
                 FROM (
                     SELECT url, is_cover, sort_order
                     FROM properia.listing_media
@@ -460,14 +460,9 @@ public class JdbcSearchRepository implements SearchRepository {
     }
 
     private List<String> parseImageUrls(ResultSet rs) throws SQLException {
-        var arr = rs.getArray("image_urls_arr");
-        if (arr == null) return List.of();
-        try {
-            var urls = (String[]) arr.getArray();
-            return urls == null ? List.of() : Arrays.asList(urls);
-        } catch (Exception e) {
-            return List.of();
-        }
+        var raw = rs.getString("image_urls_arr");
+        if (raw == null || raw.isBlank()) return List.of();
+        return List.of(raw.split("\\|"));
     }
 
     private String buildTipologia(ResultSet rs) throws SQLException {
