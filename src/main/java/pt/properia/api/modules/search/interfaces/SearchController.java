@@ -66,6 +66,20 @@ public class SearchController {
             jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN LATERAL (SELECT COUNT(*) AS c FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image') lm ON true LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv ON true LEFT JOIN LATERAL (SELECT COUNT(*) AS change_count FROM properia.listing_price_history WHERE listing_id = l.id) ph ON true WHERE l.id::text IN (" + lit + ")")
                 .query(String.class).list();
             r.put("phase2e_all_laterals_ms", System.currentTimeMillis() - t);
+
+            // Phase 2f: FULL query with ARRAY_AGG laterals (matches actual search phase 2)
+            t = System.currentTimeMillis();
+            var fullSql = "SELECT l.id::text, lm.image_urls_arr, COALESCE(dv_agg.view_count,0) AS dv, COALESCE(ph_agg.change_count,0) AS ph"
+                + " FROM properia.listings l"
+                + " LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id"
+                + " LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id"
+                + " LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id"
+                + " LEFT JOIN LATERAL (SELECT (ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC))[1] AS cover_url, ARRAY_AGG(url ORDER BY is_cover DESC, sort_order ASC) AS image_urls_arr FROM (SELECT url, is_cover, sort_order FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image' ORDER BY is_cover DESC, sort_order ASC LIMIT 5) top_media) lm ON true"
+                + " LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv_agg ON true"
+                + " LEFT JOIN LATERAL (SELECT COUNT(*)::int AS change_count, (ARRAY_AGG(price_amount ORDER BY recorded_at ASC))[1] AS first_price, MAX(recorded_at) AS last_change_at FROM properia.listing_price_history WHERE listing_id = l.id) ph_agg ON true"
+                + " WHERE l.id::text IN (" + lit + ")";
+            jdbc.sql(fullSql).query(String.class).list();
+            r.put("phase2f_full_laterals_array_agg_ms", System.currentTimeMillis() - t);
         }
 
         // count() equivalent
