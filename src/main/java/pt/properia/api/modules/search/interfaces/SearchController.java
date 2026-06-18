@@ -21,6 +21,62 @@ public class SearchController {
         this.jdbc = jdbc;
     }
 
+    // TEMPORARY diagnostic endpoint 2 — simulates full search() step by step
+    @GetMapping("/listings/diag2")
+    public ResponseEntity<?> diag2() {
+        var r = new java.util.LinkedHashMap<String, Object>();
+        long t;
+
+        // Phase 1: same as search Phase 1
+        t = System.currentTimeMillis();
+        var ids = jdbc.sql("SELECT l.id::text AS id FROM properia.listings l WHERE l.status = 'published' ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC LIMIT :lim OFFSET :off")
+            .param("lim", 6).param("off", 0).query(String.class).list();
+        r.put("phase1_ms", System.currentTimeMillis() - t);
+        r.put("ids", ids);
+
+        if (!ids.isEmpty()) {
+            var lit = ids.stream().map(id -> "'" + id + "'").collect(java.util.stream.Collectors.joining(","));
+
+            // Phase 2a: just listings JOIN (no laterals)
+            t = System.currentTimeMillis();
+            jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id LEFT JOIN properia.listing_commercial com ON com.listing_id = l.id LEFT JOIN properia.listing_zone_scores zs ON zs.listing_id = l.id WHERE l.id::text IN (" + lit + ")")
+                .query(String.class).list();
+            r.put("phase2a_joins_only_ms", System.currentTimeMillis() - t);
+
+            // Phase 2b: add listing_media lateral
+            t = System.currentTimeMillis();
+            jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN LATERAL (SELECT COUNT(*) AS c FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image') lm ON true WHERE l.id::text IN (" + lit + ")")
+                .query(String.class).list();
+            r.put("phase2b_media_lateral_ms", System.currentTimeMillis() - t);
+
+            // Phase 2c: add detail_views lateral
+            t = System.currentTimeMillis();
+            jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv ON true WHERE l.id::text IN (" + lit + ")")
+                .query(String.class).list();
+            r.put("phase2c_detail_views_lateral_ms", System.currentTimeMillis() - t);
+
+            // Phase 2d: add price_history lateral
+            t = System.currentTimeMillis();
+            jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN LATERAL (SELECT COUNT(*) AS change_count FROM properia.listing_price_history WHERE listing_id = l.id) ph ON true WHERE l.id::text IN (" + lit + ")")
+                .query(String.class).list();
+            r.put("phase2d_price_history_lateral_ms", System.currentTimeMillis() - t);
+
+            // Phase 2e: all 3 laterals combined
+            t = System.currentTimeMillis();
+            jdbc.sql("SELECT l.id::text FROM properia.listings l LEFT JOIN LATERAL (SELECT COUNT(*) AS c FROM properia.listing_media WHERE listing_id = l.id AND media_type::text = 'image') lm ON true LEFT JOIN LATERAL (SELECT COUNT(*) AS view_count FROM properia.listing_detail_views WHERE listing_id = l.id) dv ON true LEFT JOIN LATERAL (SELECT COUNT(*) AS change_count FROM properia.listing_price_history WHERE listing_id = l.id) ph ON true WHERE l.id::text IN (" + lit + ")")
+                .query(String.class).list();
+            r.put("phase2e_all_laterals_ms", System.currentTimeMillis() - t);
+        }
+
+        // count() equivalent
+        t = System.currentTimeMillis();
+        long cnt = jdbc.sql("SELECT COUNT(*) FROM properia.listings l WHERE l.status = 'published'").query(Long.class).single();
+        r.put("count_ms", System.currentTimeMillis() - t);
+        r.put("count_val", cnt);
+
+        return ResponseEntity.ok(r);
+    }
+
     // TEMPORARY diagnostic endpoint — remove after root cause is identified
     @GetMapping("/listings/diag")
     public ResponseEntity<?> diag() {
