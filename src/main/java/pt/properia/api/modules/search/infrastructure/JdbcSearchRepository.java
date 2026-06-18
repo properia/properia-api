@@ -35,33 +35,16 @@ public class JdbcSearchRepository implements SearchRepository {
         var orderBy = buildOrderBy(params.sort());
         int offset = (params.page() - 1) * params.pageSize();
 
-        // Phase 1: cheap ID-only query — no joins, no laterals, uses index for ORDER BY + LIMIT.
-        // This prevents PostgreSQL from running the expensive lateral subqueries on ALL matching
-        // rows before applying LIMIT (a common planner mistake on small tables without statistics).
-        var idSql = "SELECT l.id::text AS id FROM properia.listings l " + where.sql()
-            + "\nORDER BY " + orderBy + "\nLIMIT :limit OFFSET :offset";
-
-        var idQuery = jdbc.sql(idSql);
-        for (var e : where.params().entrySet()) {
-            idQuery = idQuery.param(e.getKey(), e.getValue());
-        }
-        idQuery = idQuery.param("limit", params.pageSize()).param("offset", offset);
-
-        long t0 = System.currentTimeMillis();
-        var ids = idQuery.query(String.class).list();
-        long t1 = System.currentTimeMillis();
-
-        if (ids.isEmpty()) {
-            long total = count(params);
-            long t2 = System.currentTimeMillis();
-            log.info("search sort={} size={} → idQuery={}ms count={}ms items=0",
-                params.sort(), params.pageSize(), (t1 - t0), (t2 - t1));
-            int totalPages = (int) Math.ceil((double) total / params.pageSize());
-            return new SearchResultDto(List.of(), total, params.page(), params.pageSize(), totalPages);
-        }
-
-        // Phase 2: fetch full details only for the page rows (at most pageSize rows).
-        var detailSql = """
+        // MATERIALIZED CTE forces PostgreSQL to resolve the page's IDs first (no joins, no laterals),
+        // then the outer query runs joins + laterals only for those rows.
+        // Without this, the planner runs laterals on ALL matching rows before LIMIT.
+        var sql = "WITH page_ids AS MATERIALIZED ("
+            + "SELECT l.id FROM properia.listings l "
+            + where.sql()
+            + " ORDER BY " + orderBy
+            + " LIMIT :limit OFFSET :offset"
+            + ")\n"
+            + """
             SELECT
               l.id, l.public_id, l.advertiser_id, l.title,
               l.business_type, l.property_type, l.status,
@@ -101,7 +84,8 @@ public class JdbcSearchRepository implements SearchRepository {
               COALESCE(ph_agg.change_count, 0)     AS ph_change_count,
               ph_agg.first_price                   AS ph_first_price,
               ph_agg.last_change_at                AS ph_last_change_at
-            FROM properia.listings l
+            FROM page_ids
+            JOIN properia.listings l ON l.id = page_ids.id
             LEFT JOIN properia.listing_pricing p ON p.listing_id = l.id
             LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
             LEFT JOIN properia.listing_features lf ON lf.listing_id = l.id
@@ -132,21 +116,23 @@ public class JdbcSearchRepository implements SearchRepository {
                 FROM properia.listing_price_history
                 WHERE listing_id = l.id
             ) ph_agg ON true
-            WHERE l.id::text IN (:ids)
-            ORDER BY """ + orderBy;
+            """ + "ORDER BY " + orderBy;
 
-        long t2 = System.currentTimeMillis();
-        var items = jdbc.sql(detailSql)
-            .param("ids", ids)
-            .query((rs, rowNum) -> mapRow(rs))
-            .list();
-        long t3 = System.currentTimeMillis();
+        var query = jdbc.sql(sql);
+        for (var e : where.params().entrySet()) {
+            query = query.param(e.getKey(), e.getValue());
+        }
+        query = query.param("limit", params.pageSize()).param("offset", offset);
+
+        long t0 = System.currentTimeMillis();
+        var items = query.query((rs, rowNum) -> mapRow(rs)).list();
+        long t1 = System.currentTimeMillis();
 
         long total = count(params);
-        long t4 = System.currentTimeMillis();
+        long t2 = System.currentTimeMillis();
 
-        log.info("search sort={} size={} → idQuery={}ms detail={}ms count={}ms total={}ms items={}",
-            params.sort(), params.pageSize(), (t1 - t0), (t3 - t2), (t4 - t3), (t4 - t0), items.size());
+        log.info("search sort={} size={} → mainQuery={}ms count={}ms total={}ms items={}",
+            params.sort(), params.pageSize(), (t1 - t0), (t2 - t1), (t2 - t0), items.size());
 
         int totalPages = (int) Math.ceil((double) total / params.pageSize());
         return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages);
