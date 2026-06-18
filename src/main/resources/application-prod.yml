@@ -9,7 +9,7 @@ spring:
       idle-timeout: 300000
       max-lifetime: 1200000
       pool-name: ProperiaHikari-Prod
-      connection-init-sql: "SET statement_timeout = 0"
+      connection-init-sql: "SELECT set_config('statement_timeout', '0', false), set_config('jit', 'off', false)"
 
   jpa:
     show-sql: false
