@@ -88,6 +88,16 @@ public class PatchListingService {
         if (body.containsKey("descriptionShort")) listing.setDescriptionShort(str(body, "descriptionShort"));
         if (body.containsKey("heroImageUrl")) listing.setHeroImageUrl(str(body, "heroImageUrl"));
         if (body.containsKey("alRegistrationNumber")) listing.setAlRegistrationNumber(str(body, "alRegistrationNumber"));
+        if (body.containsKey("licencaUtilizacao")) listing.setLicencaUtilizacao(str(body, "licencaUtilizacao"));
+        if (body.containsKey("terraceAreaM2")) listing.setTerraceAreaM2(decimal(body, "terraceAreaM2"));
+        if (body.containsKey("gardenAreaM2")) listing.setGardenAreaM2(decimal(body, "gardenAreaM2"));
+        if (body.containsKey("heatingType")) listing.setHeatingType(str(body, "heatingType"));
+        if (body.containsKey("coolingType")) listing.setCoolingType(str(body, "coolingType"));
+        if (body.containsKey("waterHeatingType")) listing.setWaterHeatingType(str(body, "waterHeatingType"));
+        if (body.containsKey("wcServico")) listing.setWcServico(intVal(body, "wcServico"));
+        if (body.containsKey("tipoCaixilharia")) listing.setTipoCaixilharia(str(body, "tipoCaixilharia"));
+        if (body.containsKey("localizacaoEdificio")) listing.setLocalizacaoEdificio(str(body, "localizacaoEdificio"));
+        if (body.containsKey("seguroCondominioIncluido")) listing.setSeguroCondominioIncluido(bool(body, "seguroCondominioIncluido"));
         if (body.containsKey("priceAmount")) listing.setPriceAmount(decimal(body, "priceAmount"));
         if (body.containsKey("bedrooms")) listing.setBedrooms(intVal(body, "bedrooms"));
         if (body.containsKey("bathrooms")) {
@@ -109,6 +119,11 @@ public class PatchListingService {
         if (body.containsKey("conditionStatus")) listing.setConditionDeclared(str(body, "conditionStatus"));
         if (body.containsKey("furnishedStatus")) listing.setFurnishedDeclared(str(body, "furnishedStatus"));
         if (body.containsKey("isFeatured")) listing.setFeatured(bool(body, "isFeatured"));
+        if (body.containsKey("exclusiveListing")) listing.setExclusiveListing(bool(body, "exclusiveListing"));
+        if (body.containsKey("fibraOtica")) listing.setFibraOtica(bool(body, "fibraOtica"));
+        if (body.containsKey("gasCanalizado")) listing.setGasCanalizado(bool(body, "gasCanalizado"));
+        if (body.containsKey("tvCabo")) listing.setTvCabo(bool(body, "tvCabo"));
+        if (body.containsKey("fossaSeptica")) listing.setFossaSeptica(bool(body, "fossaSeptica"));
         if (body.containsKey("isImmediatelyAvailable")) listing.setImmediatelyAvailable(bool(body, "isImmediatelyAvailable"));
         if (body.containsKey("availableFrom")) {
             var d = str(body, "availableFrom");
@@ -439,6 +454,7 @@ public class PatchListingService {
         resp.put("conditionStatus", saved.getConditionDeclared());
         resp.put("furnishedStatus", saved.getFurnishedDeclared());
         resp.put("isFeatured", saved.isFeatured());
+        resp.put("exclusiveListing", saved.isExclusiveListing());
         resp.put("isImmediatelyAvailable", saved.isImmediatelyAvailable());
         resp.put("visibilityStatus", saved.getVisibilityStatus());
         resp.put("publishedAt", saved.getPublishedAt() != null ? saved.getPublishedAt().toString() : null);
@@ -446,6 +462,20 @@ public class PatchListingService {
         resp.put("dataEntryAt", saved.getCreatedAt() != null ? saved.getCreatedAt().toString() : null);
         resp.put("availableFrom", saved.getAvailableFrom() != null ? saved.getAvailableFrom().toString() : null);
         resp.put("alRegistrationNumber", saved.getAlRegistrationNumber());
+        resp.put("licencaUtilizacao", saved.getLicencaUtilizacao());
+        resp.put("terraceAreaM2", saved.getTerraceAreaM2() != null ? saved.getTerraceAreaM2().toPlainString() : null);
+        resp.put("gardenAreaM2", saved.getGardenAreaM2() != null ? saved.getGardenAreaM2().toPlainString() : null);
+        resp.put("heatingType", saved.getHeatingType());
+        resp.put("coolingType", saved.getCoolingType());
+        resp.put("waterHeatingType", saved.getWaterHeatingType());
+        resp.put("wcServico", saved.getWcServico());
+        resp.put("tipoCaixilharia", saved.getTipoCaixilharia());
+        resp.put("localizacaoEdificio", saved.getLocalizacaoEdificio());
+        resp.put("seguroCondominioIncluido", saved.getSeguroCondominioIncluido());
+        resp.put("fibraOtica", saved.getFibraOtica());
+        resp.put("gasCanalizado", saved.getGasCanalizado());
+        resp.put("tvCabo", saved.getTvCabo());
+        resp.put("fossaSeptica", saved.getFossaSeptica());
         // Sub-entity fields echoed from request body (saved to respective tables)
         resp.put("condoFee", body.get("condoFee"));
         resp.put("propertyTaxAnnual", body.get("propertyTaxAnnual"));
@@ -538,6 +568,7 @@ public class PatchListingService {
         resp.put("conditionStatus", l.getConditionDeclared());
         resp.put("furnishedStatus", l.getFurnishedDeclared());
         resp.put("isFeatured", l.isFeatured());
+        resp.put("exclusiveListing", l.isExclusiveListing());
         resp.put("isImmediatelyAvailable", l.isImmediatelyAvailable());
         resp.put("visibilityStatus", l.getVisibilityStatus());
         resp.put("publishedAt", l.getPublishedAt() != null ? l.getPublishedAt().toString() : null);
@@ -545,6 +576,20 @@ public class PatchListingService {
         resp.put("dataEntryAt", l.getCreatedAt() != null ? l.getCreatedAt().toString() : null);
         resp.put("availableFrom", l.getAvailableFrom() != null ? l.getAvailableFrom().toString() : null);
         resp.put("alRegistrationNumber", l.getAlRegistrationNumber());
+        resp.put("licencaUtilizacao", l.getLicencaUtilizacao());
+        resp.put("terraceAreaM2", l.getTerraceAreaM2() != null ? l.getTerraceAreaM2().toPlainString() : null);
+        resp.put("gardenAreaM2", l.getGardenAreaM2() != null ? l.getGardenAreaM2().toPlainString() : null);
+        resp.put("heatingType", l.getHeatingType());
+        resp.put("coolingType", l.getCoolingType());
+        resp.put("waterHeatingType", l.getWaterHeatingType());
+        resp.put("wcServico", l.getWcServico());
+        resp.put("tipoCaixilharia", l.getTipoCaixilharia());
+        resp.put("localizacaoEdificio", l.getLocalizacaoEdificio());
+        resp.put("seguroCondominioIncluido", l.getSeguroCondominioIncluido());
+        resp.put("fibraOtica", l.getFibraOtica());
+        resp.put("gasCanalizado", l.getGasCanalizado());
+        resp.put("tvCabo", l.getTvCabo());
+        resp.put("fossaSeptica", l.getFossaSeptica());
 
         // Zone scores
         jdbc.sql("""

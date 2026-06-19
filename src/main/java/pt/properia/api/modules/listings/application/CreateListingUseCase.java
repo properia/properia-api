@@ -58,6 +58,21 @@ public class CreateListingUseCase {
         String energyCertificateExemptionReason,
         String youtubeVideoUrl,
         String alRegistrationNumber,
+        String licencaUtilizacao,
+        java.math.BigDecimal terraceAreaM2,
+        java.math.BigDecimal gardenAreaM2,
+        String heatingType,
+        String coolingType,
+        String waterHeatingType,
+        Integer wcServico,
+        String tipoCaixilharia,
+        String localizacaoEdificio,
+        Boolean seguroCondominioIncluido,
+        Boolean exclusiveListing,
+        Boolean fibraOtica,
+        Boolean gasCanalizado,
+        Boolean tvCabo,
+        Boolean fossaSeptica,
         Boolean isFeatured
     ) {}
 
@@ -103,6 +118,21 @@ public class CreateListingUseCase {
         listing.setConditionDeclared(cmd.conditionDeclared());
         listing.setFurnishedDeclared(cmd.furnishedDeclared());
         listing.setAlRegistrationNumber(cmd.alRegistrationNumber());
+        listing.setLicencaUtilizacao(cmd.licencaUtilizacao());
+        listing.setTerraceAreaM2(cmd.terraceAreaM2());
+        listing.setGardenAreaM2(cmd.gardenAreaM2());
+        listing.setHeatingType(cmd.heatingType());
+        listing.setCoolingType(cmd.coolingType());
+        listing.setWaterHeatingType(cmd.waterHeatingType());
+        listing.setWcServico(cmd.wcServico());
+        listing.setTipoCaixilharia(cmd.tipoCaixilharia());
+        listing.setLocalizacaoEdificio(cmd.localizacaoEdificio());
+        listing.setSeguroCondominioIncluido(cmd.seguroCondominioIncluido());
+        if (Boolean.TRUE.equals(cmd.exclusiveListing())) listing.setExclusiveListing(true);
+        if (Boolean.TRUE.equals(cmd.fibraOtica())) listing.setFibraOtica(true);
+        if (Boolean.TRUE.equals(cmd.gasCanalizado())) listing.setGasCanalizado(true);
+        if (Boolean.TRUE.equals(cmd.tvCabo())) listing.setTvCabo(true);
+        if (Boolean.TRUE.equals(cmd.fossaSeptica())) listing.setFossaSeptica(true);
         if (Boolean.TRUE.equals(cmd.isFeatured())) listing.setFeatured(true);
         listing.setStatus("draft");
 

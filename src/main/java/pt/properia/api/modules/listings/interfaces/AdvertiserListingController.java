@@ -66,6 +66,13 @@ public class AdvertiserListingController {
             req.energyRating(), req.energyCertificateNumber(),
             req.energyCertificateValidUntil(), req.energyCertificateExemptionReason(),
             req.youtubeVideoUrl(), req.alRegistrationNumber(),
+            req.licencaUtilizacao(),
+            req.terraceAreaM2(), req.gardenAreaM2(),
+            req.heatingType(), req.coolingType(), req.waterHeatingType(),
+            req.wcServico(), req.tipoCaixilharia(), req.localizacaoEdificio(),
+            req.seguroCondominioIncluido(),
+            req.exclusiveListing(),
+            req.fibraOtica(), req.gasCanalizado(), req.tvCabo(), req.fossaSeptica(),
             req.isFeatured()
         ));
         return ResponseEntity.status(201).body(Map.of("data", Map.of(

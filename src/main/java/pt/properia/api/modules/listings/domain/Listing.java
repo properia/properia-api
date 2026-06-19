@@ -160,8 +160,14 @@ public class Listing {
     @Column(name = "has_terrace", nullable = false)
     private boolean hasTerrace = false;
 
+    @Column(name = "terrace_area_m2")
+    private java.math.BigDecimal terraceAreaM2;
+
     @Column(name = "has_garden", nullable = false)
     private boolean hasGarden = false;
+
+    @Column(name = "garden_area_m2")
+    private java.math.BigDecimal gardenAreaM2;
 
     @Column(name = "has_pool", nullable = false)
     private boolean hasPool = false;
@@ -229,12 +235,51 @@ public class Listing {
     @Column(name = "al_registration_number")
     private String alRegistrationNumber;
 
+    @Column(name = "licenca_utilizacao")
+    private String licencaUtilizacao;
+
+    @Column(name = "heating_type")
+    private String heatingType;
+
+    @Column(name = "cooling_type")
+    private String coolingType;
+
+    @Column(name = "water_heating_type")
+    private String waterHeatingType;
+
+    @Column(name = "wc_servico")
+    private Integer wcServico;
+
+    @Column(name = "tipo_caixilharia")
+    private String tipoCaixilharia;
+
+    @Column(name = "localizacao_edificio")
+    private String localizacaoEdificio;
+
+    @Column(name = "seguro_condominio_incluido")
+    private Boolean seguroCondominioIncluido;
+
     @Column(name = "visibility_status", nullable = false)
     @ColumnTransformer(write = "?::properia.visibility_status")
     private String visibilityStatus = "organic";
 
     @Column(name = "is_featured", nullable = false)
     private boolean isFeatured = false;
+
+    @Column(name = "exclusive_listing", nullable = false)
+    private boolean exclusiveListing = false;
+
+    @Column(name = "fibra_otica")
+    private Boolean fibraOtica;
+
+    @Column(name = "gas_canalizado")
+    private Boolean gasCanalizado;
+
+    @Column(name = "tv_cabo")
+    private Boolean tvCabo;
+
+    @Column(name = "fossa_septica")
+    private Boolean fossaSeptica;
 
     @Column(name = "is_premium", nullable = false)
     private boolean isPremium = false;
@@ -302,7 +347,9 @@ public class Listing {
     public boolean isHasElevator() { return hasElevator; }
     public boolean isHasBalcony() { return hasBalcony; }
     public boolean isHasTerrace() { return hasTerrace; }
+    public java.math.BigDecimal getTerraceAreaM2() { return terraceAreaM2; }
     public boolean isHasGarden() { return hasGarden; }
+    public java.math.BigDecimal getGardenAreaM2() { return gardenAreaM2; }
     public boolean isHasPool() { return hasPool; }
     public boolean isHasStorageRoom() { return hasStorageRoom; }
     public boolean isHasGarage() { return hasGarage; }
@@ -325,8 +372,21 @@ public class Listing {
     public boolean isHasLaundryArea() { return hasLaundryArea; }
     public String getHeroImageUrl() { return heroImageUrl; }
     public String getAlRegistrationNumber() { return alRegistrationNumber; }
+    public String getLicencaUtilizacao() { return licencaUtilizacao; }
+    public String getHeatingType() { return heatingType; }
+    public String getCoolingType() { return coolingType; }
+    public String getWaterHeatingType() { return waterHeatingType; }
+    public Integer getWcServico() { return wcServico; }
+    public String getTipoCaixilharia() { return tipoCaixilharia; }
+    public String getLocalizacaoEdificio() { return localizacaoEdificio; }
+    public Boolean getSeguroCondominioIncluido() { return seguroCondominioIncluido; }
     public String getVisibilityStatus() { return visibilityStatus; }
     public boolean isFeatured() { return isFeatured; }
+    public boolean isExclusiveListing() { return exclusiveListing; }
+    public Boolean getFibraOtica() { return fibraOtica; }
+    public Boolean getGasCanalizado() { return gasCanalizado; }
+    public Boolean getTvCabo() { return tvCabo; }
+    public Boolean getFossaSeptica() { return fossaSeptica; }
     public boolean isPremium() { return isPremium; }
     public Instant getFirstPublishedAt() { return firstPublishedAt; }
     public Instant getPublishedAt() { return publishedAt; }
@@ -375,7 +435,9 @@ public class Listing {
     public void setHasElevator(boolean hasElevator) { this.hasElevator = hasElevator; }
     public void setHasBalcony(boolean hasBalcony) { this.hasBalcony = hasBalcony; }
     public void setHasTerrace(boolean hasTerrace) { this.hasTerrace = hasTerrace; }
+    public void setTerraceAreaM2(java.math.BigDecimal terraceAreaM2) { this.terraceAreaM2 = terraceAreaM2; }
     public void setHasGarden(boolean hasGarden) { this.hasGarden = hasGarden; }
+    public void setGardenAreaM2(java.math.BigDecimal gardenAreaM2) { this.gardenAreaM2 = gardenAreaM2; }
     public void setHasPool(boolean hasPool) { this.hasPool = hasPool; }
     public void setHasStorageRoom(boolean hasStorageRoom) { this.hasStorageRoom = hasStorageRoom; }
     public void setHasGarage(boolean hasGarage) { this.hasGarage = hasGarage; }
@@ -398,8 +460,21 @@ public class Listing {
     public void setHasLaundryArea(boolean hasLaundryArea) { this.hasLaundryArea = hasLaundryArea; }
     public void setHeroImageUrl(String heroImageUrl) { this.heroImageUrl = heroImageUrl; }
     public void setAlRegistrationNumber(String alRegistrationNumber) { this.alRegistrationNumber = alRegistrationNumber; }
+    public void setLicencaUtilizacao(String licencaUtilizacao) { this.licencaUtilizacao = licencaUtilizacao; }
+    public void setHeatingType(String heatingType) { this.heatingType = heatingType; }
+    public void setCoolingType(String coolingType) { this.coolingType = coolingType; }
+    public void setWaterHeatingType(String waterHeatingType) { this.waterHeatingType = waterHeatingType; }
+    public void setWcServico(Integer wcServico) { this.wcServico = wcServico; }
+    public void setTipoCaixilharia(String tipoCaixilharia) { this.tipoCaixilharia = tipoCaixilharia; }
+    public void setLocalizacaoEdificio(String localizacaoEdificio) { this.localizacaoEdificio = localizacaoEdificio; }
+    public void setSeguroCondominioIncluido(Boolean seguroCondominioIncluido) { this.seguroCondominioIncluido = seguroCondominioIncluido; }
     public void setVisibilityStatus(String visibilityStatus) { this.visibilityStatus = visibilityStatus; }
     public void setFeatured(boolean featured) { isFeatured = featured; }
+    public void setExclusiveListing(boolean exclusiveListing) { this.exclusiveListing = exclusiveListing; }
+    public void setFibraOtica(Boolean fibraOtica) { this.fibraOtica = fibraOtica; }
+    public void setGasCanalizado(Boolean gasCanalizado) { this.gasCanalizado = gasCanalizado; }
+    public void setTvCabo(Boolean tvCabo) { this.tvCabo = tvCabo; }
+    public void setFossaSeptica(Boolean fossaSeptica) { this.fossaSeptica = fossaSeptica; }
     public void setPremium(boolean premium) { isPremium = premium; }
     public void setFirstPublishedAt(Instant firstPublishedAt) { this.firstPublishedAt = firstPublishedAt; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
