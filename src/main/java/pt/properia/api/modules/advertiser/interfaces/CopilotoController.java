@@ -1,18 +1,23 @@
 package pt.properia.api.modules.advertiser.interfaces;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import pt.properia.api.modules.enrichment.vision.infrastructure.OpenAIProperties;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
@@ -293,6 +298,152 @@ public class CopilotoController {
                 "total", rs.getInt("total")
             ))
             .list();
+    }
+
+    // ── Streaming endpoint ────────────────────────────────────────────────────
+
+    @PostMapping("/api/advertiser/copiloto/stream")
+    public ResponseEntity<StreamingResponseBody> stream(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+
+        if (claims == null || claims.activeAdvertiserId() == null) {
+            throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
+        }
+        if (!openAiProps.isConfigured()) {
+            throw new DomainException("AI_UNAVAILABLE", "O assistente IA não está configurado neste ambiente.", 503);
+        }
+
+        var advertiserId = claims.activeAdvertiserId();
+        var question = body.getOrDefault("question", "").toString().trim();
+        if (question.isBlank()) {
+            throw new DomainException("BAD_REQUEST", "Pergunta em falta.", 400);
+        }
+
+        @SuppressWarnings("unchecked")
+        var history = body.containsKey("history")
+            ? (List<Map<String, Object>>) body.get("history")
+            : List.<Map<String, Object>>of();
+
+        var context = buildContext(advertiserId);
+        var startMs = System.currentTimeMillis();
+
+        StreamingResponseBody responseBody = outputStream -> {
+            var writer = new PrintWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8), true);
+            var accumulated = new StringBuilder();
+            try {
+                callOpenAIStream(context, question, history, chunk -> {
+                    accumulated.append(chunk);
+                    var event = Map.of("type", "token", "content", chunk);
+                    writer.print("data: " + json.writeValueAsString(event) + "\n\n");
+                    writer.flush();
+                });
+
+                String fullText = accumulated.toString();
+                String cleanText = fullText;
+                Object chartData = null;
+                int chartStart = fullText.indexOf("```chart");
+                if (chartStart >= 0) {
+                    int chartEnd = fullText.indexOf("```", chartStart + 8);
+                    if (chartEnd > chartStart) {
+                        String chartJson = fullText.substring(chartStart + 8, chartEnd).trim();
+                        cleanText = (fullText.substring(0, chartStart) + fullText.substring(chartEnd + 3)).trim();
+                        try { chartData = json.readValue(chartJson, Object.class); } catch (Exception ignored) {}
+                    }
+                }
+
+                if (!cleanText.equals(fullText)) {
+                    var replaceEvent = Map.of("type", "replace", "content", cleanText);
+                    writer.print("data: " + json.writeValueAsString(replaceEvent) + "\n\n");
+                    writer.flush();
+                }
+                if (chartData != null) {
+                    var chartEvent = Map.of("type", "chart", "data", chartData);
+                    writer.print("data: " + json.writeValueAsString(chartEvent) + "\n\n");
+                    writer.flush();
+                }
+
+                var durationMs = System.currentTimeMillis() - startMs;
+                var doneEvent = Map.of("type", "done", "durationMs", durationMs);
+                writer.print("data: " + json.writeValueAsString(doneEvent) + "\n\n");
+                writer.flush();
+
+            } catch (Exception e) {
+                try {
+                    var msg = (e instanceof DomainException de) ? de.getMessage()
+                        : "Não foi possível obter resposta. Tenta novamente.";
+                    var errorEvent = Map.of("type", "error", "message", msg);
+                    writer.print("data: " + json.writeValueAsString(errorEvent) + "\n\n");
+                    writer.flush();
+                } catch (Exception ignored) {}
+            }
+        };
+
+        return ResponseEntity.ok()
+            .header("Content-Type", MediaType.TEXT_EVENT_STREAM_VALUE)
+            .header("Cache-Control", "no-cache")
+            .header("X-Accel-Buffering", "no")
+            .body(responseBody);
+    }
+
+    @FunctionalInterface
+    private interface ThrowingConsumer<T> {
+        void accept(T t) throws Exception;
+    }
+
+    private void callOpenAIStream(
+            Map<String, Object> context, String question,
+            List<Map<String, Object>> history,
+            ThrowingConsumer<String> onChunk) throws Exception {
+
+        var contextJson = json.writeValueAsString(context);
+        var today = java.time.LocalDate.now().toString();
+        var systemContent = String.format(SYSTEM_PROMPT, today, contextJson);
+
+        var messages = new ArrayList<Map<String, Object>>();
+        messages.add(Map.of("role", "system", "content", systemContent));
+        for (var h : history) {
+            var role = h.getOrDefault("role", "user").toString();
+            var content = h.getOrDefault("content", "").toString();
+            if (!content.isBlank() && (role.equals("user") || role.equals("assistant"))) {
+                messages.add(Map.of("role", role, "content", content));
+            }
+        }
+        messages.add(Map.of("role", "user", "content", question));
+
+        var requestBody = new LinkedHashMap<String, Object>();
+        requestBody.put("model", "gpt-4.1-mini");
+        requestBody.put("messages", messages);
+        requestBody.put("max_tokens", 1200);
+        requestBody.put("temperature", 0.4);
+        requestBody.put("stream", true);
+
+        var request = HttpRequest.newBuilder()
+            .uri(URI.create(openAiProps.getUrl() + "/chat/completions"))
+            .header("Authorization", "Bearer " + openAiProps.getApiKey())
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(requestBody)))
+            .timeout(Duration.ofSeconds(60))
+            .build();
+
+        var response = http.send(request, HttpResponse.BodyHandlers.ofLines());
+        if (response.statusCode() != 200) {
+            throw new DomainException("AI_ERROR",
+                "Erro na API de IA (status " + response.statusCode() + "). Tenta novamente.", 503);
+        }
+
+        response.body().forEach(line -> {
+            if (!line.startsWith("data: ")) return;
+            var data = line.substring(6).trim();
+            if (data.equals("[DONE]")) return;
+            try {
+                var node = json.readTree(data);
+                var content = node.path("choices").path(0).path("delta").path("content").asText(null);
+                if (content != null && !content.isEmpty()) {
+                    onChunk.accept(content);
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     // ── OpenAI call ───────────────────────────────────────────────────────────
