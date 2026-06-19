@@ -17,6 +17,8 @@ public interface AuthRepository {
 
     Optional<AuthUserSummaryDto> findUserByEmail(String email);
 
+    Optional<AuthUserSummaryDto> findUserById(UUID id);
+
     AuthUserSummaryDto createLocalUser(CreateLocalUserInput input);
 
     AuthUserSummaryDto resolveOAuthIdentity(ResolveOAuthIdentityInput input);

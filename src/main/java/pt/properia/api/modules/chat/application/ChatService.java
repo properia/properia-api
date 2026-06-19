@@ -11,6 +11,7 @@ import pt.properia.api.modules.chat.domain.ChatConversation;
 import pt.properia.api.modules.chat.domain.ChatMessage;
 import pt.properia.api.modules.chat.infrastructure.ChatConversationJpaRepository;
 import pt.properia.api.modules.chat.infrastructure.ChatMessageJpaRepository;
+import pt.properia.api.modules.auth.application.AuthRepository;
 import pt.properia.api.modules.crm.application.lead.CreateLeadUseCase;
 import pt.properia.api.modules.listings.infrastructure.ListingJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
@@ -31,6 +32,7 @@ public class ChatService {
     private final ListingJpaRepository listingRepo;
     private final ChatEventPublisher eventPublisher;
     private final CreateLeadUseCase createLeadUseCase;
+    private final AuthRepository authRepository;
     private final ObjectMapper objectMapper;
 
     public ChatService(
@@ -39,12 +41,14 @@ public class ChatService {
             ListingJpaRepository listingRepo,
             ChatEventPublisher eventPublisher,
             CreateLeadUseCase createLeadUseCase,
+            AuthRepository authRepository,
             ObjectMapper objectMapper) {
         this.conversationRepo = conversationRepo;
         this.messageRepo = messageRepo;
         this.listingRepo = listingRepo;
         this.eventPublisher = eventPublisher;
         this.createLeadUseCase = createLeadUseCase;
+        this.authRepository = authRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -118,9 +122,14 @@ public class ChatService {
         try {
             var intentType = resolveIntentType(listing.getBusinessType(), qualification);
             var metadataJson = buildLeadMetadata(qualification);
+            var buyer = authRepository.findUserById(buyerUserId).orElse(null);
             var lead = createLeadUseCase.execute(new CreateLeadUseCase.Command(
                 listingId, buyerUserId, "chat", intentType,
-                initialMessage, null, null, null, metadataJson
+                initialMessage,
+                buyer != null ? buyer.name() : null,
+                buyer != null ? buyer.email() : null,
+                null,
+                metadataJson
             ));
             leadId = lead.getId();
         } catch (Exception e) {

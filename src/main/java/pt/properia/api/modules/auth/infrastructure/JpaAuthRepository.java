@@ -54,6 +54,11 @@ public class JpaAuthRepository implements AuthRepository {
     }
 
     @Override
+    public Optional<AuthUserSummaryDto> findUserById(UUID id) {
+        return users.findById(id).map(this::toSummary);
+    }
+
+    @Override
     public AuthUserSummaryDto createLocalUser(CreateLocalUserInput input) {
         String now = Instant.now().toString();
         String consents = buildConsentsJson(input.marketingConsent(), now);
