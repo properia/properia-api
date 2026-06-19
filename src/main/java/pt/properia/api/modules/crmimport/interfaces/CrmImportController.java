@@ -7,6 +7,7 @@ import pt.properia.api.modules.crmimport.application.CrmImportService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,26 +21,13 @@ public class CrmImportController {
         this.crmImportService = crmImportService;
     }
 
+    // ── Batches ───────────────────────────────────────────────────────────────
+
     @GetMapping("/batches")
     public ResponseEntity<?> listBatches(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
         var batches = crmImportService.listBatches(advertiserId);
         return ResponseEntity.ok(Map.of("data", Map.of("items", batches)));
-    }
-
-    @PostMapping("/batches")
-    public ResponseEntity<?> createBatch(
-            @RequestBody Map<String, String> body,
-            @AuthenticationPrincipal JwtClaims claims) {
-        var advertiserId = requireAdvertiserId(claims);
-        var batch = crmImportService.createBatch(
-            advertiserId, claims.userId(),
-            body.getOrDefault("sourceFamily", "manual"),
-            body.getOrDefault("sourceChannel", "manual"),
-            body.getOrDefault("ingestionMethod", "csv"),
-            body.get("fileName")
-        );
-        return ResponseEntity.status(201).body(Map.of("data", batch));
     }
 
     @GetMapping("/batches/{batchId}")
@@ -50,6 +38,72 @@ public class CrmImportController {
         var batch = crmImportService.getBatch(advertiserId, batchId);
         return ResponseEntity.ok(Map.of("data", batch));
     }
+
+    // ── Lead import ───────────────────────────────────────────────────────────
+
+    @PostMapping("/leads")
+    public ResponseEntity<?> previewLeads(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        @SuppressWarnings("unchecked")
+        var rows = (List<Map<String, Object>>) body.getOrDefault("rows", List.of());
+        var preview = crmImportService.previewLeads(advertiserId, rows);
+        return ResponseEntity.ok(Map.of("data", preview));
+    }
+
+    @PostMapping("/leads/batches")
+    public ResponseEntity<?> createLeadBatch(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        @SuppressWarnings("unchecked")
+        var rows = (List<Map<String, Object>>) body.getOrDefault("rows", List.of());
+        var result = crmImportService.createLeadBatch(
+            advertiserId,
+            claims.userId(),
+            strOrDefault(body, "sourceFamily", "manual"),
+            strOrDefault(body, "sourceChannel", "manual"),
+            strOrDefault(body, "ingestionMethod", "csv"),
+            (String) body.get("fileName"),
+            rows
+        );
+        return ResponseEntity.status(201).body(Map.of("data", result));
+    }
+
+    // ── Visit import ──────────────────────────────────────────────────────────
+
+    @PostMapping("/visits")
+    public ResponseEntity<?> previewVisits(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        @SuppressWarnings("unchecked")
+        var rows = (List<Map<String, Object>>) body.getOrDefault("rows", List.of());
+        var preview = crmImportService.previewVisits(advertiserId, rows);
+        return ResponseEntity.ok(Map.of("data", preview));
+    }
+
+    @PostMapping("/visits/batches")
+    public ResponseEntity<?> createVisitBatch(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        @SuppressWarnings("unchecked")
+        var rows = (List<Map<String, Object>>) body.getOrDefault("rows", List.of());
+        var result = crmImportService.createVisitBatch(
+            advertiserId,
+            claims.userId(),
+            strOrDefault(body, "sourceFamily", "manual"),
+            strOrDefault(body, "sourceChannel", "manual"),
+            strOrDefault(body, "ingestionMethod", "csv"),
+            (String) body.get("fileName"),
+            rows
+        );
+        return ResponseEntity.status(201).body(Map.of("data", result));
+    }
+
+    // ── Review queue ──────────────────────────────────────────────────────────
 
     @GetMapping("/review-queue")
     public ResponseEntity<?> getReviewQueue(
@@ -70,10 +124,17 @@ public class CrmImportController {
         return ResponseEntity.ok(Map.of("data", Map.of("applied", true)));
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     private UUID requireAdvertiserId(JwtClaims claims) {
         if (claims == null || claims.activeAdvertiserId() == null) {
             throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
         }
         return claims.activeAdvertiserId();
+    }
+
+    private String strOrDefault(Map<String, Object> body, String key, String defaultVal) {
+        var val = body.get(key);
+        return val != null ? val.toString() : defaultVal;
     }
 }
