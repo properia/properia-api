@@ -125,7 +125,7 @@ public class BillingService {
             throw new DomainException("CONFLICT", "Trial já foi ativado para este anunciante.");
         }
         var now = java.time.Instant.now();
-        var endsAt = now.plus(14, java.time.temporal.ChronoUnit.DAYS);
+        var endsAt = now.plus(40, java.time.temporal.ChronoUnit.DAYS);
         billingRepo.updatePlanCode(advertiserId, "business");
         billingRepo.patchBillingMetadata(advertiserId, Map.of(
             "trialActivatedAt", now.toString(),

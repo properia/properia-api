@@ -218,7 +218,7 @@ public class AdvertiserOnboardingController {
             .param("adv", id).param("uid", claims.userId())
             .param("type", advertiserType).update();
 
-        // Agencies get a 14-day Business trial; all others get 3 welcome credits
+        // Agencies get a 40-day Business trial; all others get 3 welcome credits
         if ("agency".equals(advertiserType)) {
             try { billingService.activateTrial(id); } catch (Exception ignored) {}
         } else {
