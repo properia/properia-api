@@ -6,6 +6,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -97,6 +98,9 @@ public class BuyerProfile {
     @Transient
     private Integer matchCount = 0;
 
+    @Transient
+    private List<Map<String, Object>> matches;
+
     public BuyerProfile() {}
 
     public UUID getId() { return id; }
@@ -125,6 +129,8 @@ public class BuyerProfile {
     public Instant getUpdatedAt() { return updatedAt; }
     public Integer getMatchCount() { return matchCount; }
     public void setMatchCount(Integer matchCount) { this.matchCount = matchCount; }
+    public List<Map<String, Object>> getMatches() { return matches; }
+    public void setMatches(List<Map<String, Object>> matches) { this.matches = matches; }
 
     public void setId(UUID v) { this.id = v; }
     public void setAdvertiserId(UUID v) { this.advertiserId = v; }
