@@ -212,6 +212,78 @@ public class VisitController {
 
     // ── Advertiser: manage visits ───────────────────────────────────────────
 
+    @PostMapping("/api/advertiser/visitas")
+    public ResponseEntity<?> createVisit(
+            @AuthenticationPrincipal JwtClaims claims,
+            @RequestBody Map<String, Object> body) {
+
+        var advertiserId = requireAdvertiserId(claims);
+
+        var leadIdStr = (String) body.get("leadId");
+        if (leadIdStr == null || leadIdStr.isBlank()) {
+            throw new DomainException("VALIDATION_ERROR", "É necessário indicar o lead associado à visita.", 422);
+        }
+        var leadId = UUID.fromString(leadIdStr);
+
+        var lead = jdbc.sql("""
+                SELECT listing_id, user_id FROM properia.leads
+                WHERE id = :id AND advertiser_id = :adv
+                """).param("id", leadId).param("adv", advertiserId)
+            .query((rs, n) -> {
+                var m = new java.util.LinkedHashMap<String, Object>();
+                m.put("listingId", rs.getString("listing_id"));
+                m.put("userId", rs.getString("user_id"));
+                return m;
+            })
+            .optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
+
+        var listingId = UUID.fromString((String) lead.get("listingId"));
+        var buyerUserIdStr = (String) lead.get("userId");
+        var buyerUserId = (buyerUserIdStr == null || buyerUserIdStr.isBlank()) ? null : UUID.fromString(buyerUserIdStr);
+
+        var startsAtStr = (String) body.get("startsAt");
+        if (startsAtStr == null || startsAtStr.isBlank()) {
+            throw new DomainException("VALIDATION_ERROR", "A data da visita é obrigatória.", 422);
+        }
+
+        Instant startsAt;
+        Instant endsAt = null;
+        try {
+            startsAt = Instant.parse(startsAtStr);
+            var endsAtStr = (String) body.get("endsAt");
+            if (endsAtStr != null && !endsAtStr.isBlank()) {
+                endsAt = Instant.parse(endsAtStr);
+            }
+        } catch (Exception e) {
+            throw new DomainException("VALIDATION_ERROR", "Data da visita inválida.", 422);
+        }
+
+        var mode = body.get("mode") != null ? (String) body.get("mode") : "onsite";
+        var notes = (String) body.get("notes");
+
+        var visit = requestVisit.execute(new RequestVisitUseCase.Command(
+            listingId, buyerUserId, leadId, mode, startsAt, endsAt, notes
+        ));
+
+        // Uma visita criada manualmente pelo consultor já foi acordada com o comprador
+        // (telefone/WhatsApp), por isso entra diretamente como confirmada.
+        String meetingUrl = "online".equals(mode) ? tryCreateGoogleMeet(visit.getId(), advertiserId) : null;
+        updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(visit.getId(), advertiserId, "confirmed", meetingUrl));
+
+        // Mantém o funil do lead sincronizado com a agenda de visitas
+        jdbc.sql("""
+                UPDATE properia.leads SET stage = 'visit_scheduled'::properia.lead_stage, updated_at = now()
+                WHERE id = :id AND advertiser_id = :adv AND stage NOT IN ('won', 'lost')
+                """).param("id", leadId).param("adv", advertiserId).update();
+
+        var result = new java.util.LinkedHashMap<String, Object>();
+        result.put("id", visit.getId().toString());
+        result.put("status", "confirmed");
+        result.put("meetingUrl", meetingUrl);
+        return ResponseEntity.status(201).body(Map.of("data", result));
+    }
+
     @GetMapping("/api/advertiser/visitas")
     public ResponseEntity<?> listForAdvertiser(
             @AuthenticationPrincipal JwtClaims claims,
@@ -265,6 +337,7 @@ public class VisitController {
                 SELECT v.id, v.lead_id, v.advertiser_id, v.listing_id, v.mode, v.status,
                        v.starts_at, v.ends_at, v.meeting_url, v.notes, v.created_at, v.updated_at,
                        v.buyer_confirmed_at, v.buyer_confirmation_requested_at,
+                       v.status_reason, v.outcome, v.outcome_notes,
                        l.id AS l_id, l.contact_name, l.contact_email, l.contact_phone,
                        l.source AS l_source, l.stage AS l_stage,
                        li.id AS li_id, li.public_id AS li_public_id, li.title AS li_title,
@@ -291,9 +364,9 @@ public class VisitController {
             m.put("meetingCreatedAt", null);
             m.put("meetingSyncStatus", null);
             m.put("notes", rs.getString("notes"));
-            m.put("statusReason", null);
-            m.put("outcome", null);
-            m.put("outcomeNotes", null);
+            m.put("statusReason", rs.getString("status_reason"));
+            m.put("outcome", rs.getString("outcome"));
+            m.put("outcomeNotes", rs.getString("outcome_notes"));
             m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
             m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
             m.put("buyerConfirmedAt", rs.getTimestamp("buyer_confirmed_at") != null ? rs.getTimestamp("buyer_confirmed_at").toInstant().toString() : null);
@@ -563,6 +636,46 @@ public class VisitController {
             jdbc.sql("UPDATE properia.visits SET meeting_url = :url, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
                 .param("url", meetingUrl).param("id", id).param("adv", advertiserId).update();
         }
+
+        // Campos que o use case de estado não cobre, persistidos diretamente
+        // (a entidade JPA Visit ainda não mapeia estas colunas)
+        if (body.containsKey("startsAt") && body.get("startsAt") != null) {
+            var startsAt = Instant.parse((String) body.get("startsAt"));
+            var endsAt = body.get("endsAt") != null ? Instant.parse((String) body.get("endsAt")) : null;
+            if (requestVisit.hasConflict(advertiserId, startsAt, endsAt, id)) {
+                throw new DomainException("VALIDATION_ERROR", "Já existe outra visita agendada nesse horário.", 409);
+            }
+            jdbc.sql("UPDATE properia.visits SET starts_at = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("v", Timestamp.from(startsAt)).param("id", id).param("adv", advertiserId).update();
+        }
+        if (body.containsKey("endsAt") && body.get("endsAt") != null) {
+            var endsAt = Instant.parse((String) body.get("endsAt"));
+            jdbc.sql("UPDATE properia.visits SET ends_at = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("v", Timestamp.from(endsAt)).param("id", id).param("adv", advertiserId).update();
+        }
+        if (body.containsKey("statusReason")) {
+            jdbc.sql("UPDATE properia.visits SET status_reason = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("v", (String) body.get("statusReason")).param("id", id).param("adv", advertiserId).update();
+        }
+        if (body.containsKey("outcome")) {
+            jdbc.sql("UPDATE properia.visits SET outcome = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("v", (String) body.get("outcome")).param("id", id).param("adv", advertiserId).update();
+        }
+        if (body.containsKey("outcomeNotes")) {
+            jdbc.sql("UPDATE properia.visits SET outcome_notes = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("v", (String) body.get("outcomeNotes")).param("id", id).param("adv", advertiserId).update();
+        }
+
+        // O desfecho "vai avançar para proposta" empurra o lead associado para o estágio de proposta
+        if ("proposal_next".equals(body.get("outcome"))) {
+            jdbc.sql("""
+                    UPDATE properia.leads l SET stage = 'proposal'::properia.lead_stage, updated_at = now()
+                    FROM properia.visits v
+                    WHERE v.id = :id AND v.advertiser_id = :adv AND l.id = v.lead_id
+                      AND l.advertiser_id = :adv AND l.stage NOT IN ('won', 'lost')
+                    """).param("id", id).param("adv", advertiserId).update();
+        }
+
         return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
     }
 

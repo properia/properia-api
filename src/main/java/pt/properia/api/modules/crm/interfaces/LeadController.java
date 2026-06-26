@@ -232,7 +232,7 @@ public class LeadController {
         var assignedToRaw = body.get("assignedTo");
         UUID assignedTo = assignedToRaw != null ? UUID.fromString(assignedToRaw.toString()) : null;
 
-        updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, assignedTo));
+        updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, assignedTo, null));
         return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
     }
 
@@ -245,6 +245,16 @@ public class LeadController {
             @RequestBody Map<String, Object> body) {
 
         var advertiserId = requireAdvertiserId(claims);
+        boolean stageOrCloseReasonHandled = false;
+
+        // Mudança de etapa e/ou motivo de desfecho passam pelo use case, que aplica
+        // as guardas de transição (estados terminais) e a obrigatoriedade do motivo.
+        if (body.containsKey("stage") || body.containsKey("closeReason")) {
+            var stage = body.containsKey("stage") ? (String) body.get("stage") : null;
+            var closeReason = body.containsKey("closeReason") ? (String) body.get("closeReason") : null;
+            updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, null, closeReason));
+            stageOrCloseReasonHandled = true;
+        }
 
         var sets = new ArrayList<String>();
         var params = new LinkedHashMap<String, Object>();
@@ -254,21 +264,20 @@ public class LeadController {
         if (body.containsKey("contactName")) { sets.add("contact_name = :contactName"); params.put("contactName", body.get("contactName")); }
         if (body.containsKey("contactEmail")) { sets.add("contact_email = :contactEmail"); params.put("contactEmail", body.get("contactEmail")); }
         if (body.containsKey("contactPhone")) { sets.add("contact_phone = :contactPhone"); params.put("contactPhone", body.get("contactPhone")); }
-        if (body.containsKey("stage")) { sets.add("stage = :stage::lead_stage"); params.put("stage", body.get("stage")); }
         if (body.containsKey("assignedToUserId")) {
             var v = body.get("assignedToUserId");
             sets.add("assigned_to = :assignedTo");
             params.put("assignedTo", v != null ? UUID.fromString(v.toString()) : null);
         }
 
-        if (sets.isEmpty()) return ResponseEntity.ok(Map.of("data", Map.of("updated", false)));
+        if (sets.isEmpty()) return ResponseEntity.ok(Map.of("data", Map.of("updated", stageOrCloseReasonHandled)));
 
         sets.add("updated_at = now()");
         var sql = "UPDATE properia.leads SET " + String.join(", ", sets) + " WHERE id = :id AND advertiser_id = :adv";
         var q = jdbc.sql(sql);
         for (var e : params.entrySet()) q = q.param(e.getKey(), e.getValue());
         var updated = q.update();
-        if (updated == 0) throw new DomainException("NOT_FOUND", "Lead não encontrado.", 404);
+        if (updated == 0 && !stageOrCloseReasonHandled) throw new DomainException("NOT_FOUND", "Lead não encontrado.", 404);
 
         return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
     }

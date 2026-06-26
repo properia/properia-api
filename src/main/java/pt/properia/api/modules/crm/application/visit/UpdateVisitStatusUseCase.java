@@ -14,6 +14,8 @@ public class UpdateVisitStatusUseCase {
     private static final Set<String> VALID_STATUSES =
         Set.of("requested", "confirmed", "completed", "cancelled", "no_show");
 
+    private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "cancelled", "no_show");
+
     private final VisitJpaRepository visitRepo;
 
     public UpdateVisitStatusUseCase(VisitJpaRepository visitRepo) {
@@ -29,6 +31,11 @@ public class UpdateVisitStatusUseCase {
 
         var visit = visitRepo.findByIdAndAdvertiserId(cmd.visitId(), cmd.advertiserId())
             .orElseThrow(() -> DomainException.notFound("Visita não encontrada."));
+
+        if (!cmd.status().equals(visit.getStatus()) && TERMINAL_STATUSES.contains(visit.getStatus())) {
+            throw new DomainException("VALIDATION_ERROR",
+                "Esta visita já está fechada e não pode mudar de estado. Agenda uma nova visita.", 422);
+        }
 
         visit.setStatus(cmd.status());
         if (cmd.meetingUrl() != null && !cmd.meetingUrl().isBlank()) {

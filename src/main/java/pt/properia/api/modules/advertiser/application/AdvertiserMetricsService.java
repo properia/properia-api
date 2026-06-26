@@ -120,6 +120,11 @@ public class AdvertiserMetricsService {
         long avgProposalValue = proposal > 0 ? proposalValue / proposal : 0;
         double proposalToWinRate = proposal > 0 ? Math.round((double) won / proposal * 1000) / 10.0 : 0;
 
+        // CRM contract expresses responseRate as a 0–100 percentage (see AdvertiserMetricsResponse).
+        // Same underlying definition as Pulse's responseRate (leads that moved past 'new'/'lost'),
+        // computed via the shared helper and just scaled differently per contract.
+        double responseRate = Math.round(computeResponseFraction(advertiserId, d30) * 1000) / 10.0;
+
         return new MetricsDto(
             total, today, (int) leadRows.stream().filter(r -> {
                 var age = ChronoUnit.HOURS.between((Instant) r[2], Instant.now());
@@ -128,7 +133,7 @@ public class AdvertiserMetricsService {
             0,
             (int) visitsRequested, (int) visitsConfirmed,
             visitConversionRate, winRate,
-            0.0, null,
+            responseRate, null,
             Map.of("new", nw, "contacted", contacted, "qualified", qualified,
                    "proposal", proposal, "won", won, "lost", lost),
             new CohortDto(today, last7, last30),
@@ -136,6 +141,29 @@ public class AdvertiserMetricsService {
             breakdown,
             List.of()
         );
+    }
+
+    /**
+     * Fração (0–1) de leads criados desde {@code since} que já saíram do estado 'new'
+     * (i.e. tiveram alguma resposta/avanço) ou foram perdidos. Fonte única partilhada
+     * por getMetrics() (expõe como % 0–100) e getPulse() (expõe como fração 0–1).
+     */
+    private double computeResponseFraction(UUID advertiserId, Instant since) {
+        var ts = java.sql.Timestamp.from(since);
+        long leadsSince = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.leads
+                WHERE advertiser_id = :adv AND created_at > :since
+                """)
+            .param("adv", advertiserId).param("since", ts)
+            .query(Long.class).single();
+        long respondedSince = jdbc.sql("""
+                SELECT COUNT(*) FROM properia.leads
+                WHERE advertiser_id = :adv AND created_at > :since
+                  AND stage::text NOT IN ('new','lost')
+                """)
+            .param("adv", advertiserId).param("since", ts)
+            .query(Long.class).single();
+        return leadsSince > 0 ? (double) respondedSince / leadsSince : 0.0;
     }
 
     // ── Listing metrics ───────────────────────────────────────────────────────
@@ -291,21 +319,9 @@ public class AdvertiserMetricsService {
             .param("adv", advertiserId).param("since", ts7dAgo)
             .query(Long.class).single().intValue();
 
-        // Response rate: leads in last 30 days that moved past 'new' / total
-        long leadsLast30 = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.leads
-                WHERE advertiser_id = :adv AND created_at > :since
-                """)
-            .param("adv", advertiserId).param("since", ts30dAgo)
-            .query(Long.class).single();
-        long respondedLast30 = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.leads
-                WHERE advertiser_id = :adv AND created_at > :since
-                  AND stage::text NOT IN ('new','lost')
-                """)
-            .param("adv", advertiserId).param("since", ts30dAgo)
-            .query(Long.class).single();
-        double responseRate = leadsLast30 > 0 ? (double) respondedLast30 / leadsLast30 : 0.0;
+        // Response rate (0–1 fraction, Pulse's contract scale): leads in last 30 days
+        // that moved past 'new' / total. Same definition as getMetrics(), via shared helper.
+        double responseRate = computeResponseFraction(advertiserId, now.minus(30, ChronoUnit.DAYS));
 
         // Visits (use lead join same as getMetrics)
         var visitStats = jdbc.sql("""
