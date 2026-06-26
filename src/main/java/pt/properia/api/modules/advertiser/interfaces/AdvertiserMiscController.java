@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.media.infrastructure.R2UploadService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
@@ -27,12 +28,15 @@ public class AdvertiserMiscController {
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
     private final R2UploadService r2;
+    private final LeadStageAdvancer leadStageAdvancer;
     private final Path localStorageDir;
 
-    public AdvertiserMiscController(JdbcClient jdbc, ObjectMapper objectMapper, R2UploadService r2) {
+    public AdvertiserMiscController(JdbcClient jdbc, ObjectMapper objectMapper, R2UploadService r2,
+                                    LeadStageAdvancer leadStageAdvancer) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.r2 = r2;
+        this.leadStageAdvancer = leadStageAdvancer;
         this.localStorageDir = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads");
     }
 
@@ -298,6 +302,10 @@ public class AdvertiserMiscController {
             .param("rid", responseId).param("lid", id).param("adv", advertiserId)
             .param("uid", claims.userId()).param("type", responseType)
             .param("note", note).param("outcome", outcome).update();
+
+        // Registar uma resposta comercial é contactar o lead → avança new->contacted
+        // (forward-only; não regride leads já mais avançados nem fechados).
+        leadStageAdvancer.advanceForward(id, advertiserId, "contacted");
 
         // Log CRM audit event
         try {

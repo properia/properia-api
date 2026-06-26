@@ -25,16 +25,19 @@ public class LeadController {
 
     private final CreateLeadUseCase createLead;
     private final UpdateLeadStageUseCase updateLeadStage;
+    private final LeadStageAdvancer leadStageAdvancer;
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
 
     public LeadController(
             CreateLeadUseCase createLead,
             UpdateLeadStageUseCase updateLeadStage,
+            LeadStageAdvancer leadStageAdvancer,
             JdbcClient jdbc,
             ObjectMapper objectMapper) {
         this.createLead = createLead;
         this.updateLeadStage = updateLeadStage;
+        this.leadStageAdvancer = leadStageAdvancer;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
     }
@@ -371,6 +374,11 @@ public class LeadController {
                 || body.containsKey("markOpened") || body.containsKey("closeSummary")) {
             mergeLeadMetadata(id, advertiserId, claims, body);
             stageOrCloseReasonHandled = true;
+
+            // Guardar uma proposta avança o lead para 'proposal' (forward-only).
+            if (body.get("proposal") != null) {
+                leadStageAdvancer.advanceForward(id, advertiserId, "proposal");
+            }
         }
 
         var sets = new ArrayList<String>();
