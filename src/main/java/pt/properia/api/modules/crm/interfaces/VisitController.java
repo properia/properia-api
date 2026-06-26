@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
 import pt.properia.api.modules.advertiser.application.GoogleCalendarService;
+import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.crm.application.visit.*;
 import pt.properia.api.modules.crm.interfaces.request.RequestVisitRequest;
 import pt.properia.api.shared.domain.DomainException;
@@ -35,6 +36,7 @@ public class VisitController {
     private final JdbcClient jdbc;
     private final AuthEmailService emailService;
     private final GoogleCalendarService calendarService;
+    private final LeadStageAdvancer leadStageAdvancer;
 
     public VisitController(
             RequestVisitUseCase requestVisit,
@@ -42,13 +44,15 @@ public class VisitController {
             GetVisitsUseCase getVisits,
             JdbcClient jdbc,
             AuthEmailService emailService,
-            GoogleCalendarService calendarService) {
+            GoogleCalendarService calendarService,
+            LeadStageAdvancer leadStageAdvancer) {
         this.requestVisit     = requestVisit;
         this.updateVisitStatus = updateVisitStatus;
         this.getVisits        = getVisits;
         this.jdbc             = jdbc;
         this.emailService     = emailService;
         this.calendarService  = calendarService;
+        this.leadStageAdvancer = leadStageAdvancer;
     }
 
     // ── Buyer: request a visit ──────────────────────────────────────────────
@@ -117,13 +121,13 @@ public class VisitController {
         java.time.Instant startsAt = java.time.Instant.parse(req.slotStartsAt());
         java.time.Instant endsAt = req.slotEndsAt() != null ? java.time.Instant.parse(req.slotEndsAt()) : null;
 
-        // Check if slot already booked (waitlist if so)
-        var alreadyBooked = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.visits
-                WHERE listing_id = :lid AND status IN ('requested','confirmed')
-                  AND starts_at = :starts
-                """).param("lid", listingId).param("starts", java.sql.Timestamp.from(startsAt))
-            .query(Long.class).single() > 0;
+        var advertiserId = UUID.fromString(jdbc.sql("SELECT advertiser_id::text FROM properia.leads WHERE id = :id")
+            .param("id", leadId).query(String.class).single());
+
+        // Slot sobreposto a uma visita ativa → o comprador entra em lista de espera
+        // (sem erro duro). A guarda 409 de conflito aplica-se ao agendamento do
+        // consultor (createVisit/reschedule), não ao pedido do comprador.
+        boolean conflict = requestVisit.hasConflict(advertiserId, startsAt, endsAt, null);
 
         var visit = requestVisit.execute(new RequestVisitUseCase.Command(
             listingId, claims.userId(), leadId,
@@ -131,12 +135,16 @@ public class VisitController {
             startsAt, endsAt, req.message()
         ));
 
-        if (alreadyBooked) {
+        if (conflict) {
             jdbc.sql("UPDATE properia.visits SET status = 'waitlist', updated_at = now() WHERE id = :id")
                 .param("id", visit.getId()).update();
         }
 
-        String finalStatus = alreadyBooked ? "waitlist" : visit.getStatus();
+        // Pedir visita é sinal forte de interesse — avança o lead para 'contacted'
+        // (forward-only; não regride leads já mais avançados nem fechados).
+        leadStageAdvancer.advanceForward(leadId, advertiserId, "contacted");
+
+        String finalStatus = conflict ? "waitlist" : visit.getStatus();
 
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
             "leadId", leadId.toString(),
@@ -262,6 +270,12 @@ public class VisitController {
         var mode = body.get("mode") != null ? (String) body.get("mode") : "onsite";
         var notes = (String) body.get("notes");
 
+        // O consultor não pode marcar em cima de outra visita ativa: erro duro (409),
+        // ao contrário do pedido do comprador (que vai para lista de espera).
+        if (requestVisit.hasConflict(advertiserId, startsAt, endsAt, null)) {
+            throw new DomainException("VALIDATION_ERROR", "Já existe outra visita agendada nesse horário.", 409);
+        }
+
         var visit = requestVisit.execute(new RequestVisitUseCase.Command(
             listingId, buyerUserId, leadId, mode, startsAt, endsAt, notes
         ));
@@ -269,13 +283,9 @@ public class VisitController {
         // Uma visita criada manualmente pelo consultor já foi acordada com o comprador
         // (telefone/WhatsApp), por isso entra diretamente como confirmada.
         String meetingUrl = "online".equals(mode) ? tryCreateGoogleMeet(visit.getId(), advertiserId) : null;
+        // A confirmação avança o lead para 'visit_scheduled' (forward-only) dentro do
+        // próprio use case, pelo que não regride leads já em proposal/won.
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(visit.getId(), advertiserId, "confirmed", meetingUrl));
-
-        // Mantém o funil do lead sincronizado com a agenda de visitas
-        jdbc.sql("""
-                UPDATE properia.leads SET stage = 'visit_scheduled'::properia.lead_stage, updated_at = now()
-                WHERE id = :id AND advertiser_id = :adv AND stage NOT IN ('won', 'lost')
-                """).param("id", leadId).param("adv", advertiserId).update();
 
         var result = new java.util.LinkedHashMap<String, Object>();
         result.put("id", visit.getId().toString());

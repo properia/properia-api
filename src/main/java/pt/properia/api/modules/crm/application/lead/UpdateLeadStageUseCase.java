@@ -1,6 +1,7 @@
 package pt.properia.api.modules.crm.application.lead;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import pt.properia.api.modules.crm.domain.Lead;
 import pt.properia.api.modules.crm.infrastructure.LeadJpaRepository;
@@ -24,10 +25,12 @@ public class UpdateLeadStageUseCase {
 
     private final LeadJpaRepository leadRepo;
     private final ObjectMapper objectMapper;
+    private final JdbcClient jdbc;
 
-    public UpdateLeadStageUseCase(LeadJpaRepository leadRepo, ObjectMapper objectMapper) {
+    public UpdateLeadStageUseCase(LeadJpaRepository leadRepo, ObjectMapper objectMapper, JdbcClient jdbc) {
         this.leadRepo = leadRepo;
         this.objectMapper = objectMapper;
+        this.jdbc = jdbc;
     }
 
     public record Command(UUID leadId, UUID advertiserId, String stage, UUID assignedTo, String closeReason) {}
@@ -70,7 +73,21 @@ public class UpdateLeadStageUseCase {
             lead.setMetadata(mergeCloseReason(lead.getMetadata(), cmd.closeReason()));
         }
 
-        return leadRepo.save(lead);
+        var saved = leadRepo.save(lead);
+
+        // Fechar o lead (won/lost) encerra a conversa de chat associada: o comprador
+        // deixa de poder enviar mensagens e o ciclo fica fechado de ambos os lados.
+        if (changingStage && TERMINAL_STAGES.contains(targetStage)) {
+            jdbc.sql("""
+                    UPDATE properia.chat_conversations
+                    SET status = 'closed', closed_at = now()
+                    WHERE lead_id = :lid AND status <> 'closed'
+                    """)
+                .param("lid", cmd.leadId())
+                .update();
+        }
+
+        return saved;
     }
 
     private String extractCloseReason(String metadataJson) {

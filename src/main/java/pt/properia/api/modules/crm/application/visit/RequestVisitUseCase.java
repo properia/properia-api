@@ -47,9 +47,10 @@ public class RequestVisitUseCase {
         var listing = listingRepo.findById(cmd.listingId())
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
 
-        if (hasConflict(listing.getAdvertiserId(), cmd.startsAt(), cmd.endsAt(), null)) {
-            throw new DomainException("VALIDATION_ERROR", "Já existe outra visita agendada nesse horário.", 409);
-        }
+        // A política de conflito é decidida pelos callers (ver hasConflict):
+        //  - pedido do comprador  → entra em lista de espera (sem erro);
+        //  - agendamento/reagendamento do consultor → 409.
+        // Por isso a criação em si não rejeita sobreposições.
 
         var visit = new Visit();
         visit.setListingId(listing.getId());

@@ -1,6 +1,7 @@
 package pt.properia.api.modules.crm.application.visit;
 
 import org.springframework.stereotype.Service;
+import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.crm.domain.Visit;
 import pt.properia.api.modules.crm.infrastructure.VisitJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
@@ -12,14 +13,16 @@ import java.util.UUID;
 public class UpdateVisitStatusUseCase {
 
     private static final Set<String> VALID_STATUSES =
-        Set.of("requested", "confirmed", "completed", "cancelled", "no_show");
+        Set.of("requested", "confirmed", "completed", "cancelled", "no_show", "expired");
 
     private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "cancelled", "no_show");
 
     private final VisitJpaRepository visitRepo;
+    private final LeadStageAdvancer leadStageAdvancer;
 
-    public UpdateVisitStatusUseCase(VisitJpaRepository visitRepo) {
+    public UpdateVisitStatusUseCase(VisitJpaRepository visitRepo, LeadStageAdvancer leadStageAdvancer) {
         this.visitRepo = visitRepo;
+        this.leadStageAdvancer = leadStageAdvancer;
     }
 
     public record Command(UUID visitId, UUID advertiserId, String status, String meetingUrl) {}
@@ -42,6 +45,15 @@ public class UpdateVisitStatusUseCase {
             visit.setMeetingUrl(cmd.meetingUrl());
         }
 
-        return visitRepo.save(visit);
+        var saved = visitRepo.save(visit);
+
+        // Confirmar uma visita coloca o lead em 'visit_scheduled' (forward-only).
+        // Cobre todos os caminhos de confirmação: endpoint /confirm, PATCH status e
+        // a criação manual pelo consultor.
+        if ("confirmed".equals(cmd.status())) {
+            leadStageAdvancer.advanceForward(saved.getLeadId(), saved.getAdvertiserId(), "visit_scheduled");
+        }
+
+        return saved;
     }
 }

@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,19 +24,16 @@ import java.util.UUID;
 public class LeadController {
 
     private final CreateLeadUseCase createLead;
-    private final GetAdvertiserLeadsUseCase getAdvertiserLeads;
     private final UpdateLeadStageUseCase updateLeadStage;
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
 
     public LeadController(
             CreateLeadUseCase createLead,
-            GetAdvertiserLeadsUseCase getAdvertiserLeads,
             UpdateLeadStageUseCase updateLeadStage,
             JdbcClient jdbc,
             ObjectMapper objectMapper) {
         this.createLead = createLead;
-        this.getAdvertiserLeads = getAdvertiserLeads;
         this.updateLeadStage = updateLeadStage;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
@@ -184,6 +182,17 @@ public class LeadController {
                     if (parsed.containsKey("openedAt")) meta.put("openedAt", parsed.get("openedAt"));
                     if (parsed.containsKey("openedByUserId")) meta.put("openedByUserId", parsed.get("openedByUserId"));
                     if (parsed.containsKey("closeReason")) meta.put("closeReason", parsed.get("closeReason"));
+                    if (parsed.containsKey("closeSummary")) meta.put("closeSummary", parsed.get("closeSummary"));
+                    // Dados de qualificação/dossier escritos pelo chat — antes descartados
+                    if (parsed.containsKey("chatQualification")) meta.put("chatQualification", parsed.get("chatQualification"));
+                    if (parsed.containsKey("decisionDossier")) {
+                        meta.put("decisionDossier", parsed.get("decisionDossier"));
+                        if (parsed.get("decisionDossier") != null) m.put("hasDecisionDossier", true);
+                    }
+                    // Proposta lida do metadata quando exista persistência; null caso contrário
+                    if (parsed.containsKey("proposal") && parsed.get("proposal") != null) {
+                        m.put("proposal", parsed.get("proposal"));
+                    }
                 } catch (Exception ignored) {}
             }
             m.put("metadata", meta);
@@ -208,6 +217,104 @@ public class LeadController {
         }
         if (priority != null && !priority.isBlank() && !"todas".equals(priority)) {
             items = items.stream().filter(item -> priority.equals(item.get("priority"))).toList();
+        }
+
+        // ── Enriquecimento (em lote, sem N+1): conversa de chat, respostas comerciais e timeline ──
+        // O contrato do FE espera conversation/responseCount/lastResponseAt/timeline reais.
+        // Antes vinham sempre vazios ("o ecrã mentia"). Carregamos só para a página atual.
+        if (!items.isEmpty()) {
+            var leadIds = items.stream()
+                .map(it -> UUID.fromString((String) it.get("id")))
+                .toList();
+
+            // Chat → conversation (asc), última msg outbound e nº de outbound por lead
+            var conversationByLead = new HashMap<UUID, List<Map<String, Object>>>();
+            var lastOutboundByLead = new HashMap<UUID, Instant>();
+            var outboundCountByLead = new HashMap<UUID, Integer>();
+            jdbc.sql("""
+                    SELECT lead_id, id, sender_type::text AS sender_type, body, created_at
+                    FROM properia.chat_messages
+                    WHERE lead_id IN (:ids)
+                    ORDER BY created_at ASC
+                    """)
+                .param("ids", leadIds)
+                .query((rs, n) -> {
+                    var leadId = UUID.fromString(rs.getString("lead_id"));
+                    var senderType = rs.getString("sender_type");
+                    var createdAt = rs.getTimestamp("created_at").toInstant();
+                    var direction = "buyer".equals(senderType) ? "inbound"
+                        : "advertiser_member".equals(senderType) ? "outbound" : "internal";
+                    var title = "inbound".equals(direction) ? "Mensagem do comprador"
+                        : "outbound".equals(direction) ? "Resposta enviada" : "Mensagem de sistema";
+                    var entry = new LinkedHashMap<String, Object>();
+                    entry.put("id", rs.getString("id"));
+                    entry.put("direction", direction);
+                    entry.put("channel", "message");
+                    entry.put("title", title);
+                    entry.put("body", rs.getString("body"));
+                    entry.put("createdAt", createdAt.toString());
+                    conversationByLead.computeIfAbsent(leadId, k -> new ArrayList<>()).add(entry);
+                    if ("outbound".equals(direction)) {
+                        outboundCountByLead.merge(leadId, 1, Integer::sum);
+                        lastOutboundByLead.merge(leadId, createdAt, (a, b) -> b.isAfter(a) ? b : a);
+                    }
+                    return leadId;
+                }).list();
+
+            // Respostas comerciais → timeline + contagem + última resposta
+            var responseTimelineByLead = new HashMap<UUID, List<Map<String, Object>>>();
+            var responseCountByLead = new HashMap<UUID, Integer>();
+            var lastResponseByLead = new HashMap<UUID, Instant>();
+            jdbc.sql("""
+                    SELECT lead_id, id, response_type, note, created_at
+                    FROM properia.lead_responses
+                    WHERE lead_id IN (:ids)
+                    ORDER BY created_at ASC
+                    """)
+                .param("ids", leadIds)
+                .query((rs, n) -> {
+                    var leadId = UUID.fromString(rs.getString("lead_id"));
+                    var createdAt = rs.getTimestamp("created_at").toInstant();
+                    var note = rs.getString("note");
+                    var entry = new LinkedHashMap<String, Object>();
+                    entry.put("id", rs.getString("id"));
+                    entry.put("type", "response");
+                    entry.put("title", responseTypeLabel(rs.getString("response_type")));
+                    entry.put("description", note != null ? note : "");
+                    entry.put("createdAt", createdAt.toString());
+                    responseTimelineByLead.computeIfAbsent(leadId, k -> new ArrayList<>()).add(entry);
+                    responseCountByLead.merge(leadId, 1, Integer::sum);
+                    lastResponseByLead.merge(leadId, createdAt, (a, b) -> b.isAfter(a) ? b : a);
+                    return leadId;
+                }).list();
+
+            for (var it : items) {
+                var leadId = UUID.fromString((String) it.get("id"));
+
+                it.put("conversation", conversationByLead.getOrDefault(leadId, List.of()));
+
+                // "Respondido" = respostas comerciais registadas + mensagens enviadas no chat
+                it.put("responseCount",
+                    responseCountByLead.getOrDefault(leadId, 0)
+                        + outboundCountByLead.getOrDefault(leadId, 0));
+
+                var lastAny = lastResponseByLead.get(leadId);
+                var lastOut = lastOutboundByLead.get(leadId);
+                if (lastOut != null && (lastAny == null || lastOut.isAfter(lastAny))) lastAny = lastOut;
+                it.put("lastResponseAt", lastAny != null ? lastAny.toString() : null);
+
+                // Timeline: evento de criação + respostas (as mensagens ficam em conversation)
+                var timeline = new ArrayList<Map<String, Object>>();
+                var createdEvent = new LinkedHashMap<String, Object>();
+                createdEvent.put("id", "created-" + leadId);
+                createdEvent.put("type", "created");
+                createdEvent.put("title", "Lead criado");
+                createdEvent.put("description", "Contacto entrou no CRM.");
+                createdEvent.put("createdAt", it.get("createdAt"));
+                timeline.add(createdEvent);
+                timeline.addAll(responseTimelineByLead.getOrDefault(leadId, List.of()));
+                it.put("timeline", timeline);
+            }
         }
 
         int totalPages = (int) Math.ceil((double) total / safePageSize);
@@ -253,6 +360,16 @@ public class LeadController {
             var stage = body.containsKey("stage") ? (String) body.get("stage") : null;
             var closeReason = body.containsKey("closeReason") ? (String) body.get("closeReason") : null;
             updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, null, closeReason));
+            stageOrCloseReasonHandled = true;
+        }
+
+        // Campos guardados no metadata jsonb (proposta, notas internas, abertura, resumo de
+        // fecho). Antes eram aceites pelo contrato mas descartados — o FE mostrava sucesso
+        // sem nada persistir. Corre depois do updateLeadStage para ler o metadata já com o
+        // closeReason commitado e não o sobrescrever.
+        if (body.containsKey("proposal") || body.containsKey("appendInternalNote")
+                || body.containsKey("markOpened") || body.containsKey("closeSummary")) {
+            mergeLeadMetadata(id, advertiserId, claims, body);
             stageOrCloseReasonHandled = true;
         }
 
@@ -313,6 +430,89 @@ public class LeadController {
             }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
         return ResponseEntity.ok(Map.of("data", lead));
+    }
+
+    /** Lê-modifica-escreve o metadata jsonb do lead com os campos não-relacionais. */
+    @SuppressWarnings("unchecked")
+    private void mergeLeadMetadata(UUID id, UUID advertiserId, JwtClaims claims, Map<String, Object> body) {
+        var currentJson = jdbc.sql("SELECT metadata FROM properia.leads WHERE id = :id AND advertiser_id = :adv")
+            .param("id", id).param("adv", advertiserId)
+            .query(String.class).optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
+
+        Map<String, Object> meta;
+        try {
+            meta = (currentJson != null && !currentJson.isBlank())
+                ? new LinkedHashMap<>(objectMapper.readValue(currentJson, Map.class))
+                : new LinkedHashMap<>();
+        } catch (Exception e) {
+            meta = new LinkedHashMap<>();
+        }
+
+        // markOpened — regista a primeira abertura (openedAt/openedByUserId), idempotente
+        if (Boolean.TRUE.equals(body.get("markOpened")) && meta.get("openedAt") == null) {
+            meta.put("openedAt", Instant.now().toString());
+            meta.put("openedByUserId",
+                claims != null && claims.userId() != null ? claims.userId().toString() : null);
+        }
+
+        // appendInternalNote — acrescenta nota ao histórico
+        if (body.containsKey("appendInternalNote")) {
+            var raw = body.get("appendInternalNote");
+            if (raw != null && !raw.toString().isBlank()) {
+                var notes = new ArrayList<Object>();
+                if (meta.get("internalNotes") instanceof List<?> existing) notes.addAll(existing);
+                var note = new LinkedHashMap<String, Object>();
+                note.put("id", UUID.randomUUID().toString());
+                note.put("text", raw.toString().trim());
+                note.put("createdAt", Instant.now().toString());
+                notes.add(note);
+                meta.put("internalNotes", notes);
+            }
+        }
+
+        // closeSummary — resumo livre do desfecho
+        if (body.containsKey("closeSummary")) {
+            var raw = body.get("closeSummary");
+            meta.put("closeSummary", raw != null ? raw.toString() : null);
+        }
+
+        // proposal — merge parcial; null remove a proposta
+        if (body.containsKey("proposal")) {
+            var raw = body.get("proposal");
+            if (raw == null) {
+                meta.remove("proposal");
+            } else if (raw instanceof Map<?, ?> incoming) {
+                var proposal = new LinkedHashMap<String, Object>();
+                if (meta.get("proposal") instanceof Map<?, ?> existing) {
+                    for (var e : existing.entrySet()) proposal.put(e.getKey().toString(), e.getValue());
+                }
+                for (var e : incoming.entrySet()) proposal.put(e.getKey().toString(), e.getValue());
+                proposal.put("currency", "EUR");
+                proposal.put("updatedAt", Instant.now().toString());
+                meta.put("proposal", proposal);
+            }
+        }
+
+        try {
+            var json = objectMapper.writeValueAsString(meta);
+            jdbc.sql("UPDATE properia.leads SET metadata = :meta::jsonb, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
+                .param("meta", json).param("id", id).param("adv", advertiserId).update();
+        } catch (Exception e) {
+            throw new DomainException("INTERNAL", "Não foi possível guardar os dados do lead.", 500);
+        }
+    }
+
+    private static String responseTypeLabel(String type) {
+        if (type == null) return "Resposta registada";
+        return switch (type) {
+            case "call" -> "Chamada registada";
+            case "email" -> "Email enviado";
+            case "whatsapp" -> "Mensagem WhatsApp";
+            case "sms" -> "SMS enviado";
+            case "meeting" -> "Reunião realizada";
+            default -> "Resposta registada";
+        };
     }
 
     private UUID requireAdvertiserId(JwtClaims claims) {

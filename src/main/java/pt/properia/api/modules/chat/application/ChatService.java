@@ -13,6 +13,7 @@ import pt.properia.api.modules.chat.infrastructure.ChatConversationJpaRepository
 import pt.properia.api.modules.chat.infrastructure.ChatMessageJpaRepository;
 import pt.properia.api.modules.auth.application.AuthRepository;
 import pt.properia.api.modules.crm.application.lead.CreateLeadUseCase;
+import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.listings.infrastructure.ListingJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
 
@@ -32,6 +33,7 @@ public class ChatService {
     private final ListingJpaRepository listingRepo;
     private final ChatEventPublisher eventPublisher;
     private final CreateLeadUseCase createLeadUseCase;
+    private final LeadStageAdvancer leadStageAdvancer;
     private final AuthRepository authRepository;
     private final ObjectMapper objectMapper;
 
@@ -41,6 +43,7 @@ public class ChatService {
             ListingJpaRepository listingRepo,
             ChatEventPublisher eventPublisher,
             CreateLeadUseCase createLeadUseCase,
+            LeadStageAdvancer leadStageAdvancer,
             AuthRepository authRepository,
             ObjectMapper objectMapper) {
         this.conversationRepo = conversationRepo;
@@ -48,6 +51,7 @@ public class ChatService {
         this.listingRepo = listingRepo;
         this.eventPublisher = eventPublisher;
         this.createLeadUseCase = createLeadUseCase;
+        this.leadStageAdvancer = leadStageAdvancer;
         this.authRepository = authRepository;
         this.objectMapper = objectMapper;
     }
@@ -79,6 +83,9 @@ public class ChatService {
         var saved = messageRepo.save(message);
 
         updateConversationPreview(conv, body);
+        // Responder ao comprador é, por si só, "contactar" o lead — avança o funil
+        // (apenas para a frente; não regride leads já mais avançados ou fechados).
+        leadStageAdvancer.advanceForward(conv.getLeadId(), conv.getAdvertiserId(), "contacted");
         var dto = toMessageDto(saved);
         eventPublisher.publishNewMessage(conv.getId(), conv.getAdvertiserId(), conv.getBuyerUserId(), dto);
         return dto;

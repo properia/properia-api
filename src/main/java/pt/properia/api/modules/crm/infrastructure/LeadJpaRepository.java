@@ -12,4 +12,6 @@ public interface LeadJpaRepository extends JpaRepository<Lead, UUID> {
     List<Lead> findByAdvertiserIdOrderByCreatedAtDesc(UUID advertiserId);
 
     Optional<Lead> findByIdAndAdvertiserId(UUID id, UUID advertiserId);
+
+    Optional<Lead> findFirstByListingIdAndUserIdOrderByCreatedAtAsc(UUID listingId, UUID userId);
 }

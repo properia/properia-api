@@ -35,6 +35,22 @@ public class CreateLeadUseCase {
         var listing = listingRepo.findById(cmd.listingId())
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
 
+        // Deduplicação: um comprador autenticado = um lead por imóvel. Se já existe lead
+        // para (imóvel, comprador), reutiliza-o (preenchendo só contactos em falta) em vez
+        // de criar duplicados quando o mesmo comprador chega por vários canais
+        // (formulário + chat + pedido de visita). Leads anónimos (sem userId) não deduplicam.
+        if (cmd.userId() != null) {
+            var existing = leadRepo.findFirstByListingIdAndUserIdOrderByCreatedAtAsc(cmd.listingId(), cmd.userId());
+            if (existing.isPresent()) {
+                var lead = existing.get();
+                boolean dirty = false;
+                if (isBlank(lead.getContactName()) && !isBlank(cmd.contactName())) { lead.setContactName(cmd.contactName()); dirty = true; }
+                if (isBlank(lead.getContactEmail()) && !isBlank(cmd.contactEmail())) { lead.setContactEmail(cmd.contactEmail()); dirty = true; }
+                if (isBlank(lead.getContactPhone()) && !isBlank(cmd.contactPhone())) { lead.setContactPhone(cmd.contactPhone()); dirty = true; }
+                return dirty ? leadRepo.save(lead) : lead;
+            }
+        }
+
         var lead = new Lead();
         lead.setListingId(listing.getId());
         lead.setAdvertiserId(listing.getAdvertiserId());
@@ -48,5 +64,9 @@ public class CreateLeadUseCase {
         lead.setMetadata(cmd.metadataJson() != null ? cmd.metadataJson() : "{}");
 
         return leadRepo.save(lead);
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 }
