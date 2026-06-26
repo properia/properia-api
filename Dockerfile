@@ -31,8 +31,11 @@ RUN chown properia:properia app.jar
 USER properia
 
 ENTRYPOINT ["java", \
-  "-XX:+UseZGC", \
-  "-XX:MaxRAMPercentage=75", \
+  "-XX:+UseG1GC", \
+  "-XX:MaxRAMPercentage=60", \
+  "-XX:MaxMetaspaceSize=160m", \
+  "-XX:ReservedCodeCacheSize=64m", \
+  "-Xss512k", \
   "-Djava.net.preferIPv4Stack=true", \
   "-jar", "app.jar"]
 
