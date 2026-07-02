@@ -3,6 +3,7 @@ package pt.properia.api.modules.team.application;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
 import pt.properia.api.modules.team.domain.AdvertiserTeamInvite;
 import pt.properia.api.modules.team.domain.AdvertiserUser;
 import pt.properia.api.modules.team.domain.AdvertiserUserId;
@@ -25,14 +26,17 @@ public class TeamService {
     private final AdvertiserUserJpaRepository memberRepo;
     private final AdvertiserTeamInviteJpaRepository inviteRepo;
     private final JdbcClient jdbc;
+    private final AuthEmailService emailService;
     private final SecureRandom rng = new SecureRandom();
 
     public TeamService(AdvertiserUserJpaRepository memberRepo,
                        AdvertiserTeamInviteJpaRepository inviteRepo,
-                       JdbcClient jdbc) {
+                       JdbcClient jdbc,
+                       AuthEmailService emailService) {
         this.memberRepo = memberRepo;
         this.inviteRepo = inviteRepo;
         this.jdbc = jdbc;
+        this.emailService = emailService;
     }
 
     // ── Member records with user info ─────────────────────────────────────────
@@ -174,6 +178,14 @@ public class TeamService {
             .optional()
             .orElse("—");
 
+        var agencyName = jdbc.sql("SELECT name FROM properia.advertisers WHERE id = :id")
+            .param("id", advertiserId)
+            .query(String.class)
+            .optional()
+            .orElse("Properia");
+
+        emailService.sendTeamInvite(finalEmail, invitorName, agencyName, role, token);
+
         return new InviteDto(invite.getId(), invite.getEmail(), invite.getMembershipRole(),
             "pending", invitorName, expiresAt, null, invite.getCreatedAt());
     }
@@ -237,6 +249,14 @@ public class TeamService {
             .query(String.class)
             .optional()
             .orElse("—");
+
+        var agencyName = jdbc.sql("SELECT name FROM properia.advertisers WHERE id = :id")
+            .param("id", advertiserId)
+            .query(String.class)
+            .optional()
+            .orElse("Properia");
+
+        emailService.sendTeamInvite(invite.getEmail(), invitorName, agencyName, invite.getMembershipRole(), token);
 
         return new InviteDto(invite.getId(), invite.getEmail(), invite.getMembershipRole(),
             "pending", invitorName, expiresAt, null, invite.getCreatedAt());

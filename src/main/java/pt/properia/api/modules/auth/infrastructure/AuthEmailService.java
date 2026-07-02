@@ -87,6 +87,22 @@ public class AuthEmailService {
         );
     }
 
+    public void sendTeamInvite(String to, String inviterName, String agencyName, String role, String token) {
+        String acceptUrl = appUrl + "/convite/" + token;
+        String roleLabel = switch (role) {
+            case "admin"  -> "Administrador";
+            case "editor" -> "Editor";
+            case "sales"  -> "Corretor";
+            case "viewer" -> "Visualizador";
+            default       -> role;
+        };
+        send(to,
+            inviterName + " convidou-te para a equipa na Properia",
+            teamInviteHtml(inviterName, agencyName, roleLabel, acceptUrl),
+            inviterName + " convidou-te para a equipa \"" + agencyName + "\" na Properia como " + roleLabel + ".\nAceita aqui: " + acceptUrl + "\nO convite expira em 7 dias."
+        );
+    }
+
     private void send(String to, String subject, String htmlBody, String textBody) {
         if (!enabled) {
             log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
@@ -120,6 +136,73 @@ public class AuthEmailService {
             log.error("Failed to send email from='{}' to={} subject='{}': {}", from, to, subject, e.getMessage());
             throw new DomainException("EMAIL_SEND_FAILED", "Não foi possível enviar o email: " + e.getMessage(), 503);
         }
+    }
+
+    private String teamInviteHtml(String inviterName, String agencyName, String roleLabel, String acceptUrl) {
+        return """
+            <!DOCTYPE html>
+            <html lang="pt">
+            <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+            <body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif">
+              <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px">
+                <tr><td align="center">
+                  <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.08)">
+                    <!-- header -->
+                    <tr>
+                      <td style="padding:32px 40px 24px;border-bottom:1px solid #f0f0f0" align="center">
+                        <img src="https://media.properia.pt/brand/properia-logo-email.png"
+                             alt="Properia" width="140" style="display:block;height:auto">
+                      </td>
+                    </tr>
+                    <!-- body -->
+                    <tr>
+                      <td style="padding:36px 40px 8px">
+                        <p style="margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:2px;color:#c4622d;text-transform:uppercase">Convite para a equipa</p>
+                        <h1 style="margin:0 0 20px;font-size:24px;font-weight:800;color:#111;line-height:1.25">
+                          Junta-te à equipa<br>da %s
+                        </h1>
+                        <p style="margin:0 0 24px;font-size:15px;color:#444;line-height:1.6">
+                          <strong>%s</strong> convidou-te para fazer parte da equipa <strong>%s</strong> na Properia.
+                        </p>
+                        <!-- role pill -->
+                        <p style="margin:0 0 28px">
+                          <span style="display:inline-block;background:#f6ece5;color:#8a4a2b;font-size:13px;font-weight:700;padding:6px 14px;border-radius:20px">%s</span>
+                        </p>
+                        <!-- CTA button -->
+                        <table cellpadding="0" cellspacing="0" style="margin-bottom:24px">
+                          <tr>
+                            <td style="border-radius:10px;background:linear-gradient(135deg,#c4622d,#e8855a)">
+                              <a href="%s"
+                                 style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#fff;text-decoration:none;border-radius:10px;background:linear-gradient(135deg,#c4622d,#e8855a)">
+                                Aceitar convite →
+                              </a>
+                            </td>
+                          </tr>
+                        </table>
+                        <p style="margin:0 0 8px;font-size:13px;color:#888">
+                          Ou copia este link para o navegador:<br>
+                          <a href="%s" style="color:#c4622d;word-break:break-all">%s</a>
+                        </p>
+                      </td>
+                    </tr>
+                    <!-- expiry notice -->
+                    <tr>
+                      <td style="padding:20px 40px;background:#fafafa;border-top:1px solid #f0f0f0">
+                        <p style="margin:0;font-size:12px;color:#aaa">Este convite expira em 7 dias. Se não reconheces este email, podes ignorá-lo com segurança.</p>
+                      </td>
+                    </tr>
+                    <!-- footer -->
+                    <tr>
+                      <td style="padding:20px 40px" align="center">
+                        <p style="margin:0;font-size:12px;color:#ccc">Properia · Plataforma tecnológica imobiliária · properia.pt</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+            </html>
+            """.formatted(agencyName, inviterName, agencyName, roleLabel, acceptUrl, acceptUrl, acceptUrl);
     }
 
     private String html(String title, String body, String ctaLabel, String ctaUrl) {
