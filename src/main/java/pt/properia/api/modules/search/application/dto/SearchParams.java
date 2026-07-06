@@ -18,6 +18,7 @@ public record SearchParams(
     Integer floorMin,
     List<String> sunExposure,
     List<String> features,
+    List<String> excludeFeatures,   // features negadas ("sem varanda") — a excluir
     String disponibilidade,
     String sort,             // "recente" | "preco_asc" | "preco_desc" | "area"
     int page,
@@ -47,7 +48,7 @@ public record SearchParams(
         return new SearchParams(
             "", "todos", List.of(), List.of(),
             null, null, List.of(), List.of(),
-            null, null, null, List.of(), null, List.of(), List.of(), "",
+            null, null, null, List.of(), null, List.of(), List.of(), List.of(), "",
             "recente", 1, 24,
             null, null, null, null,
             false, false, false, false, false, null,

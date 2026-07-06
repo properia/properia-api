@@ -286,6 +286,21 @@ public class JdbcSearchRepository implements SearchRepository {
             }
         }
 
+        // Excluded feature flags ("sem varanda") — inverso do bloco acima.
+        // IS NOT TRUE cobre FALSE e NULL (imóveis sem o dado deixam de ser excluídos por engano).
+        if (p.excludeFeatures() != null) {
+            for (var feature : p.excludeFeatures()) {
+                if ("pet_friendly".equals(feature)) {
+                    parts.add("NOT EXISTS (SELECT 1 FROM properia.listing_features lf3 WHERE lf3.listing_id = l.id AND lf3.feature_flags::jsonb->>'pet_friendly' = 'true')");
+                } else {
+                    var col = mapFeatureToColumn(feature);
+                    if (col != null) {
+                        parts.add("l." + col + " IS NOT TRUE");
+                    }
+                }
+            }
+        }
+
         // Room-specific filters (join only when needed)
         boolean needsRoomJoin = p.roomHasPrivateBathroom() || p.roomBillsIncluded()
             || p.roomInternetIncluded() || p.roomCoupleAllowed() || p.roomIsExterior()
