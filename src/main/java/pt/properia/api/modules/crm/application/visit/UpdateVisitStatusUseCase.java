@@ -6,6 +6,7 @@ import pt.properia.api.modules.crm.domain.Visit;
 import pt.properia.api.modules.crm.infrastructure.VisitJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -13,9 +14,22 @@ import java.util.UUID;
 public class UpdateVisitStatusUseCase {
 
     private static final Set<String> VALID_STATUSES =
-        Set.of("requested", "confirmed", "completed", "cancelled", "no_show", "expired");
+        Set.of("requested", "waitlist", "confirmed", "completed", "cancelled", "no_show", "expired");
 
     private static final Set<String> TERMINAL_STATUSES = Set.of("completed", "cancelled", "no_show");
+
+    // Máquina de estados das visitas: de cada estado, para que estados se pode transitar.
+    // Terminais (completed/cancelled/no_show) não têm saída. 'expired' é um estado neutro de
+    // "precisa de revisão" que o consultor resolve para o desfecho real.
+    private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
+        "requested", Set.of("confirmed", "cancelled", "expired"),
+        "waitlist",  Set.of("confirmed", "cancelled", "expired"),
+        "confirmed", Set.of("completed", "no_show", "cancelled", "expired"),
+        "expired",   Set.of("completed", "no_show", "cancelled"),
+        "completed", Set.of(),
+        "cancelled", Set.of(),
+        "no_show",   Set.of()
+    );
 
     private final VisitJpaRepository visitRepo;
     private final LeadStageAdvancer leadStageAdvancer;
@@ -35,9 +49,17 @@ public class UpdateVisitStatusUseCase {
         var visit = visitRepo.findByIdAndAdvertiserId(cmd.visitId(), cmd.advertiserId())
             .orElseThrow(() -> DomainException.notFound("Visita não encontrada."));
 
-        if (!cmd.status().equals(visit.getStatus()) && TERMINAL_STATUSES.contains(visit.getStatus())) {
-            throw new DomainException("VALIDATION_ERROR",
-                "Esta visita já está fechada e não pode mudar de estado. Agenda uma nova visita.", 422);
+        var current = visit.getStatus();
+        var target = cmd.status();
+        if (!target.equals(current)) {
+            if (TERMINAL_STATUSES.contains(current)) {
+                throw new DomainException("CONFLICT",
+                    "Esta visita já está fechada e não pode mudar de estado. Agenda uma nova visita.", 409);
+            }
+            if (!ALLOWED_TRANSITIONS.getOrDefault(current, Set.of()).contains(target)) {
+                throw new DomainException("CONFLICT",
+                    "Transição de estado inválida: " + current + " → " + target + ".", 409);
+            }
         }
 
         visit.setStatus(cmd.status());

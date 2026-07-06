@@ -42,5 +42,22 @@ public class VisitExpiryJob {
         if (updated > 0) {
             log.info("VisitExpiryJob: {} visita(s) marcada(s) como 'expired' por falta de resolução.", updated);
         }
+
+        // Pedidos em lista de espera cujo horário já passou nunca conseguiram vaga — deixam de
+        // fazer sentido. Fecham-se automaticamente como 'cancelled' (a lista de espera não vira
+        // visita, por isso não há desfecho a registar, ao contrário do fluxo 'expired'). Correção BR-4.
+        var waitlistClosed = jdbc.sql("""
+                UPDATE properia.visits
+                SET status = 'cancelled'::properia.visit_status,
+                    status_reason = 'auto_waitlist_slot_passed',
+                    updated_at = now()
+                WHERE status = 'waitlist'
+                  AND COALESCE(ends_at, starts_at + interval '%s') < now() - interval '%s'
+                """.formatted(DEFAULT_VISIT_DURATION, GRACE_INTERVAL))
+            .update();
+
+        if (waitlistClosed > 0) {
+            log.info("VisitExpiryJob: {} pedido(s) em lista de espera fechado(s) por o horário ter passado.", waitlistClosed);
+        }
     }
 }

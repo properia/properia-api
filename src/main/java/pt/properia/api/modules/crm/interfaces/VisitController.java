@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
 import pt.properia.api.modules.advertiser.application.GoogleCalendarService;
@@ -631,6 +632,7 @@ public class VisitController {
 
     // ── Advertiser: update individual visit ───────────────────────────────────
 
+    @Transactional
     @PatchMapping("/api/advertiser/visitas/{id}")
     public ResponseEntity<?> updateVisit(
             @PathVariable UUID id,
@@ -639,6 +641,20 @@ public class VisitController {
         var advertiserId = requireAdvertiserId(claims);
         var status = body.containsKey("status") ? (String) body.get("status") : null;
         var meetingUrl = body.containsKey("meetingUrl") ? (String) body.get("meetingUrl") : null;
+
+        // Valida o novo horário ANTES de aplicar qualquer mudança (o PATCH não é atómico entre
+        // statements), para não deixar a visita meio-atualizada (ex.: estado muda mas a data falha).
+        Instant newStartsAt = null;
+        if (body.containsKey("startsAt") && body.get("startsAt") != null) {
+            newStartsAt = Instant.parse((String) body.get("startsAt"));
+            var newEndsAt = body.get("endsAt") != null ? Instant.parse((String) body.get("endsAt")) : null;
+            if (newStartsAt.isBefore(Instant.now())) {
+                throw new DomainException("VALIDATION_ERROR", "A data da visita não pode ser no passado.", 422);
+            }
+            if (requestVisit.hasConflict(advertiserId, newStartsAt, newEndsAt, id)) {
+                throw new DomainException("VALIDATION_ERROR", "Já existe outra visita agendada nesse horário.", 409);
+            }
+        }
 
         if (status != null) {
             updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(id, advertiserId, status, meetingUrl));
@@ -649,14 +665,18 @@ public class VisitController {
 
         // Campos que o use case de estado não cobre, persistidos diretamente
         // (a entidade JPA Visit ainda não mapeia estas colunas)
-        if (body.containsKey("startsAt") && body.get("startsAt") != null) {
-            var startsAt = Instant.parse((String) body.get("startsAt"));
-            var endsAt = body.get("endsAt") != null ? Instant.parse((String) body.get("endsAt")) : null;
-            if (requestVisit.hasConflict(advertiserId, startsAt, endsAt, id)) {
-                throw new DomainException("VALIDATION_ERROR", "Já existe outra visita agendada nesse horário.", 409);
-            }
-            jdbc.sql("UPDATE properia.visits SET starts_at = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
-                .param("v", Timestamp.from(startsAt)).param("id", id).param("adv", advertiserId).update();
+        if (newStartsAt != null) {
+            // Mudar a hora invalida qualquer confirmação de presença do comprador para a hora
+            // anterior — o comprador nunca acordou o novo horário (correção BR-1).
+            jdbc.sql("""
+                    UPDATE properia.visits
+                    SET starts_at = :v,
+                        buyer_confirmed_at = NULL,
+                        buyer_confirmation_requested_at = NULL,
+                        updated_at = now()
+                    WHERE id = :id AND advertiser_id = :adv
+                    """)
+                .param("v", Timestamp.from(newStartsAt)).param("id", id).param("adv", advertiserId).update();
         }
         if (body.containsKey("endsAt") && body.get("endsAt") != null) {
             var endsAt = Instant.parse((String) body.get("endsAt"));
@@ -667,17 +687,28 @@ public class VisitController {
             jdbc.sql("UPDATE properia.visits SET status_reason = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
                 .param("v", (String) body.get("statusReason")).param("id", id).param("adv", advertiserId).update();
         }
-        if (body.containsKey("outcome")) {
+        // O resultado (outcome) é o desfecho de uma visita que ACONTECEU — só faz sentido em
+        // visitas concluídas. Impede registar resultado (ou empurrar o lead para proposta) numa
+        // visita ainda por confirmar/confirmada ou reagendada (correção BR-3).
+        boolean hasOutcome = body.containsKey("outcome") || body.containsKey("outcomeNotes");
+        String effectiveStatus = status;
+        if (hasOutcome && effectiveStatus == null) {
+            effectiveStatus = jdbc.sql("SELECT status::text FROM properia.visits WHERE id = :id AND advertiser_id = :adv")
+                .param("id", id).param("adv", advertiserId).query(String.class).optional().orElse(null);
+        }
+        boolean outcomeAllowed = "completed".equals(effectiveStatus);
+
+        if (outcomeAllowed && body.containsKey("outcome")) {
             jdbc.sql("UPDATE properia.visits SET outcome = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
                 .param("v", (String) body.get("outcome")).param("id", id).param("adv", advertiserId).update();
         }
-        if (body.containsKey("outcomeNotes")) {
+        if (outcomeAllowed && body.containsKey("outcomeNotes")) {
             jdbc.sql("UPDATE properia.visits SET outcome_notes = :v, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
                 .param("v", (String) body.get("outcomeNotes")).param("id", id).param("adv", advertiserId).update();
         }
 
         // O desfecho "vai avançar para proposta" empurra o lead associado para o estágio de proposta
-        if ("proposal_next".equals(body.get("outcome"))) {
+        if (outcomeAllowed && "proposal_next".equals(body.get("outcome"))) {
             jdbc.sql("""
                     UPDATE properia.leads l SET stage = 'proposal'::properia.lead_stage, updated_at = now()
                     FROM properia.visits v
