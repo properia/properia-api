@@ -3,6 +3,7 @@ package pt.properia.api.shared.infrastructure.web;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -90,6 +91,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
             .body(ApiError.of("BAD_REQUEST", "Parâmetro inválido: " + ex.getName()));
+    }
+
+    // ── Conflitos de integridade (constraints da BD) ────────────────────────────
+
+    /**
+     * Violações de constraints únicas / de exclusão → 409. Cobre a rede de segurança
+     * contra double-booking de visitas (EXCLUDE) e outras corridas apanhadas pela BD.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrity(DataIntegrityViolationException ex) {
+        var msg = ex.getMostSpecificCause().getMessage();
+        if (msg != null && msg.contains("visits_no_overlap_confirmed")) {
+            return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ApiError.of("CONFLICT", "Já existe outra visita agendada nesse horário."));
+        }
+        log.warn("Data integrity violation: {}", msg);
+        return ResponseEntity
+            .status(HttpStatus.CONFLICT)
+            .body(ApiError.of("CONFLICT", "O pedido entra em conflito com dados existentes."));
     }
 
     // ── Catch-all ─────────────────────────────────────────────────────────────

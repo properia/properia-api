@@ -8,6 +8,7 @@ import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.billing.infrastructure.AdvertiserBillingRepository;
 import pt.properia.api.modules.billing.infrastructure.StripeProperties;
 import pt.properia.api.shared.domain.DomainException;
@@ -96,6 +97,7 @@ public class BillingService {
 
     // ── Webhook ───────────────────────────────────────────────────────────────
 
+    @Transactional
     public void handleWebhook(byte[] payload, String signature) {
         if (stripeProps.getWebhookSecret().isBlank()) return;
 
@@ -109,6 +111,13 @@ public class BillingService {
             throw new DomainException("INVALID_SIGNATURE", "Assinatura Stripe inválida.", 400);
         }
 
+        // Idempotência: a Stripe entrega at-least-once e por vezes fora de ordem. Se o evento
+        // já foi processado, ignora (evita duplicar créditos / baralhar o estado — correção #3).
+        // A transação garante que a marca e as mutações commitam juntas.
+        if (!billingRepo.markWebhookProcessed(event.getId(), event.getType())) {
+            return;
+        }
+
         switch (event.getType()) {
             case "checkout.session.completed" -> handleCheckoutCompleted(event);
             case "customer.subscription.updated" -> handleSubscriptionUpdated(event);
@@ -119,20 +128,21 @@ public class BillingService {
 
     // ── Trial ─────────────────────────────────────────────────────────────────
 
+    @Transactional
     public void activateTrial(UUID advertiserId) {
-        var meta = billingRepo.getSnapshot(advertiserId).billingMetadata();
-        if (meta.containsKey("trialActivatedAt")) {
-            throw new DomainException("CONFLICT", "Trial já foi ativado para este anunciante.");
-        }
         var now = java.time.Instant.now();
         var endsAt = now.plus(40, java.time.temporal.ChronoUnit.DAYS);
-        billingRepo.updatePlanCode(advertiserId, "business");
-        billingRepo.patchBillingMetadata(advertiserId, Map.of(
+        // Ativação atómica e idempotente: plano + metadata num único UPDATE guardado.
+        // Se já estava ativo, o UPDATE não afeta linhas → CONFLICT (sem check-then-act).
+        var activated = billingRepo.activateTrialOnce(advertiserId, "business", Map.of(
             "trialActivatedAt", now.toString(),
             "trialEndsAt", endsAt.toString(),
             "trialPlanCode", "business",
             "paymentStatus", "active"
         ));
+        if (!activated) {
+            throw new DomainException("CONFLICT", "Trial já foi ativado para este anunciante.");
+        }
     }
 
     // ── Credits ───────────────────────────────────────────────────────────────
@@ -141,12 +151,15 @@ public class BillingService {
         return billingRepo.getCreditBalance(advertiserId);
     }
 
+    @Transactional
     public void grantWelcomeCredits(UUID advertiserId, int amount) {
-        var current = billingRepo.getCreditBalance(advertiserId);
-        var after = current + amount;
-        billingRepo.addCreditTransaction(advertiserId, "bonus", amount, after, null,
+        // Incremento atómico + guarda idempotente: só concede (e regista no ledger) se ainda
+        // não tinham sido concedidos. Elimina o lost-update e a dupla concessão (correção #2).
+        var newBalance = billingRepo.grantWelcomeCreditsOnce(advertiserId, amount,
+            java.time.Instant.now().toString());
+        if (newBalance.isEmpty()) return; // já concedidos anteriormente
+        billingRepo.addCreditTransaction(advertiserId, "bonus", amount, newBalance.get(), null,
             "Créditos de boas-vindas — bem-vindo à Properia!");
-        billingRepo.patchBillingMetadata(advertiserId, Map.of("creditBalance", after));
     }
 
     // ── Plan info ─────────────────────────────────────────────────────────────
@@ -177,8 +190,10 @@ public class BillingService {
             .putMetadata("advertiserId", advertiserId.toString())
             .build());
 
-        billingRepo.patchBillingMetadata(advertiserId, Map.of("stripeCustomerId", customer.getId()));
-        return customer.getId();
+        // Claim atómico: se dois checkouts correrem em paralelo, ambos podem criar um cliente
+        // Stripe, mas só um id fica guardado — todos passam a usar esse (o outro fica órfão,
+        // inerte). Evita fixar clientes diferentes em pedidos concorrentes (correção #7).
+        return billingRepo.claimStripeCustomerId(advertiserId, customer.getId());
     }
 
     private void handleCheckoutCompleted(Event event) {

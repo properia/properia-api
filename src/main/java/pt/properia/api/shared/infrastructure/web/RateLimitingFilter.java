@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Token-bucket rate limiter (Bucket4j, in-memory).
@@ -33,8 +35,27 @@ import java.util.concurrent.ConcurrentHashMap;
 @Order(1)
 public class RateLimitingFilter extends OncePerRequestFilter {
 
-    // Bucket maps keyed by "tier:ip"
-    private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
+    // Bucket maps keyed by "tier:ip". O holder guarda o último acesso para que o sweep
+    // periódico remova entradas inativas — senão o mapa cresceria sem limite (correção #10).
+    private final Map<String, BucketEntry> buckets = new ConcurrentHashMap<>();
+
+    private static final long IDLE_EVICT_MS = Duration.ofMinutes(10).toMillis();
+
+    private static final class BucketEntry {
+        final Bucket bucket;
+        final AtomicLong lastAccessMs;
+        BucketEntry(Bucket bucket) {
+            this.bucket = bucket;
+            this.lastAccessMs = new AtomicLong(System.currentTimeMillis());
+        }
+    }
+
+    /** Remove buckets inativos há mais de 10 min, limitando o uso de memória por IP. */
+    @Scheduled(fixedRate = 5 * 60 * 1000L, initialDelay = 5 * 60 * 1000L)
+    void evictIdleBuckets() {
+        var cutoff = System.currentTimeMillis() - IDLE_EVICT_MS;
+        buckets.entrySet().removeIf(e -> e.getValue().lastAccessMs.get() < cutoff);
+    }
 
     // ── Tier definitions ──────────────────────────────────────────────────────
 
@@ -66,9 +87,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                                     FilterChain chain) throws ServletException, IOException {
         var ip   = resolveClientIp(request);
         var tier = resolveTier(request);
-        var bucket = buckets.computeIfAbsent(tier.name() + ":" + ip, k -> newBucket(tier));
+        var entry = buckets.computeIfAbsent(tier.name() + ":" + ip, k -> new BucketEntry(newBucket(tier)));
+        entry.lastAccessMs.set(System.currentTimeMillis());
 
-        var probe = bucket.tryConsumeAndReturnRemaining(1);
+        var probe = entry.bucket.tryConsumeAndReturnRemaining(1);
 
         response.setHeader("X-RateLimit-Limit",     String.valueOf(tier.capacity));
         response.setHeader("X-RateLimit-Remaining", String.valueOf(probe.getRemainingTokens()));

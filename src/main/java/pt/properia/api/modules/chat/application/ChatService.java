@@ -3,6 +3,7 @@ package pt.properia.api.modules.chat.application;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pt.properia.api.modules.chat.application.dto.ConversationDto;
@@ -36,6 +37,7 @@ public class ChatService {
     private final LeadStageAdvancer leadStageAdvancer;
     private final AuthRepository authRepository;
     private final ObjectMapper objectMapper;
+    private final JdbcClient jdbc;
 
     public ChatService(
             ChatConversationJpaRepository conversationRepo,
@@ -45,7 +47,8 @@ public class ChatService {
             CreateLeadUseCase createLeadUseCase,
             LeadStageAdvancer leadStageAdvancer,
             AuthRepository authRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            JdbcClient jdbc) {
         this.conversationRepo = conversationRepo;
         this.messageRepo = messageRepo;
         this.listingRepo = listingRepo;
@@ -54,6 +57,7 @@ public class ChatService {
         this.leadStageAdvancer = leadStageAdvancer;
         this.authRepository = authRepository;
         this.objectMapper = objectMapper;
+        this.jdbc = jdbc;
     }
 
     // ── Advertiser side ────────────────────────────────────────────────────────
@@ -113,6 +117,16 @@ public class ChatService {
     public ConversationDto getOrCreateConversation(UUID listingId, UUID buyerUserId, String initialMessage, Map<String, Object> qualification) {
         var listing = listingRepo.findById(listingId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
+
+        // Serializa o get-or-create por (imóvel, comprador) com um advisory lock transacional.
+        // Sem isto, dois pedidos concorrentes do mesmo comprador passavam ambos o findBy...,
+        // e o segundo insert violava o unique (advertiser,listing,buyer) → 500, além de criar
+        // um lead órfão antes do insert falhar (correção #8). O lock liberta-se no commit.
+        jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(:a), hashtext(:b))")
+            .param("a", listingId.toString())
+            .param("b", buyerUserId.toString())
+            .query((rs, n) -> null)
+            .optional();
 
         var existing = conversationRepo.findByAdvertiserIdAndListingIdAndBuyerUserId(
             listing.getAdvertiserId(), listingId, buyerUserId);

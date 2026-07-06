@@ -42,19 +42,120 @@ public class AdvertiserBillingRepository {
             .orElse(new BillingSnapshot("free", Map.of(), 0));
     }
 
+    /**
+     * Aplica um patch (merge raso de chaves de topo) ao billing_metadata de forma ATÓMICA.
+     * Usa `||` (jsonb concat) no próprio UPDATE, com lock de linha do Postgres, em vez do
+     * antigo read-modify-write que perdia patches concorrentes (ver correção #1).
+     */
     public void patchBillingMetadata(UUID advertiserId, Map<String, Object> patch) {
         try {
-            var current = getSnapshot(advertiserId).billingMetadata();
-            var merged = new java.util.LinkedHashMap<>(current);
-            merged.putAll(patch);
-            var json = objectMapper.writeValueAsString(merged);
-            jdbc.sql("UPDATE properia.advertisers SET billing_metadata = :meta::jsonb WHERE id = :id")
-                .param("meta", json)
+            var json = objectMapper.writeValueAsString(patch);
+            jdbc.sql("""
+                    UPDATE properia.advertisers
+                    SET billing_metadata = COALESCE(billing_metadata, '{}'::jsonb) || :patch::jsonb
+                    WHERE id = :id
+                    """)
+                .param("patch", json)
                 .param("id", advertiserId)
                 .update();
         } catch (Exception e) {
             throw new RuntimeException("Failed to patch billing metadata", e);
         }
+    }
+
+    /**
+     * Concede créditos de boas-vindas UMA só vez, atomicamente. Devolve o novo saldo se
+     * concedeu agora, ou empty se já tinham sido concedidos (guarda idempotente na cláusula
+     * WHERE — sem check-then-act, sem lost-update; ver correção #2).
+     */
+    public java.util.Optional<Integer> grantWelcomeCreditsOnce(UUID advertiserId, int amount, String nowIso) {
+        return jdbc.sql("""
+                UPDATE properia.advertisers
+                SET billing_metadata = jsonb_set(
+                        jsonb_set(
+                            COALESCE(billing_metadata, '{}'::jsonb),
+                            '{creditBalance}',
+                            to_jsonb(COALESCE((billing_metadata->>'creditBalance')::int, 0) + :amount)),
+                        '{welcomeCreditsGrantedAt}', to_jsonb(:now::text))
+                WHERE id = :id
+                  AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'welcomeCreditsGrantedAt')
+                RETURNING (billing_metadata->>'creditBalance')::int
+                """)
+            .param("amount", amount)
+            .param("now", nowIso)
+            .param("id", advertiserId)
+            .query(Integer.class)
+            .optional();
+    }
+
+    /**
+     * Ativa o trial UMA só vez, atomicamente (plano + metadata num único UPDATE guardado).
+     * Devolve true se ativou agora, false se já estava ativo (correção #6).
+     */
+    public boolean activateTrialOnce(UUID advertiserId, String planCode, Map<String, Object> metaPatch) {
+        try {
+            var json = objectMapper.writeValueAsString(metaPatch);
+            var rows = jdbc.sql("""
+                    UPDATE properia.advertisers
+                    SET plan_code = :plan,
+                        billing_metadata = COALESCE(billing_metadata, '{}'::jsonb) || :patch::jsonb
+                    WHERE id = :id
+                      AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'trialActivatedAt')
+                    """)
+                .param("plan", planCode)
+                .param("patch", json)
+                .param("id", advertiserId)
+                .update();
+            return rows > 0;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to activate trial", e);
+        }
+    }
+
+    /**
+     * Marca um evento Stripe como processado. Devolve true se foi inserido agora (primeira vez),
+     * false se já existia (replay/duplicado) — dedup de webhooks (correção #3).
+     */
+    public boolean markWebhookProcessed(String eventId, String eventType) {
+        if (eventId == null || eventId.isBlank()) return true; // sem id → não deduplicamos
+        var inserted = jdbc.sql("""
+                INSERT INTO properia.stripe_webhook_events (event_id, event_type)
+                VALUES (:id, :type)
+                ON CONFLICT (event_id) DO NOTHING
+                """)
+            .param("id", eventId)
+            .param("type", eventType)
+            .update();
+        return inserted > 0;
+    }
+
+    /**
+     * Guarda o stripeCustomerId apenas se ainda não existir (claim atómico) e devolve o id
+     * efetivo — o nosso se ganhámos, ou o já existente se outra thread ganhou. Evita que dois
+     * checkouts concorrentes fixem clientes Stripe diferentes; o cliente perdedor fica órfão
+     * mas inerte (correção #7).
+     */
+    public String claimStripeCustomerId(UUID advertiserId, String candidateId) {
+        return jdbc.sql("""
+                WITH upd AS (
+                    UPDATE properia.advertisers
+                    SET billing_metadata = jsonb_set(
+                            COALESCE(billing_metadata, '{}'::jsonb),
+                            '{stripeCustomerId}', to_jsonb(:cid::text))
+                    WHERE id = :id
+                      AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'stripeCustomerId')
+                    RETURNING billing_metadata->>'stripeCustomerId' AS cid
+                )
+                SELECT cid FROM upd
+                UNION ALL
+                SELECT billing_metadata->>'stripeCustomerId'
+                FROM properia.advertisers WHERE id = :id
+                LIMIT 1
+                """)
+            .param("cid", candidateId)
+            .param("id", advertiserId)
+            .query(String.class)
+            .single();
     }
 
     public void updatePlanCode(UUID advertiserId, String planCode) {

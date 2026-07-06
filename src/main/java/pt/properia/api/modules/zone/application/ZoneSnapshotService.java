@@ -73,9 +73,25 @@ public class ZoneSnapshotService {
             ? UUID.fromString((String) existing.get().get("id"))
             : insertPendingSnapshot(listingId, fingerprint, lat, lng, street, neighborhood, city, precision);
 
-        // Mark as processing
-        jdbc.sql("UPDATE properia.listing_zone_snapshots SET status = 'processing', last_attempt_at = now(), updated_at = now() WHERE id = :id")
-            .param("id", snapshotId).update();
+        // Claim atómico do processamento: só um trigger fica com o snapshot em 'processing'.
+        // Se outro já o está a processar (e não está preso há >5 min), este sai sem repetir a
+        // chamada externa ao Overpass (correção #9). O guard de staleness permite recuperar de
+        // um processamento anterior que tenha crashado.
+        var claimed = jdbc.sql("""
+                UPDATE properia.listing_zone_snapshots
+                SET status = 'processing', last_attempt_at = now(), updated_at = now()
+                WHERE id = :id
+                  AND (status <> 'processing' OR last_attempt_at < now() - interval '5 minutes')
+                RETURNING id
+                """)
+            .param("id", snapshotId)
+            .query(UUID.class)
+            .optional();
+
+        if (claimed.isEmpty()) {
+            log.info("Zone snapshot {} já está a ser processado por outro trigger — a saltar.", snapshotId);
+            return;
+        }
 
         // Fetch POIs from Overpass
         var results = overpassClient.fetchAll(lat, lng);
