@@ -59,7 +59,12 @@ class AuthIntegrationTest extends IntegrationTestBase {
         .then()
             .statusCode(200)
             .header("Set-Cookie", containsString("properia_session"))
-            .body("data.user.email", equalTo("login@example.com"));
+            .body("data.user.id", notNullValue())
+            .body("data.user.email", equalTo("login@example.com"))
+            // Regressão: "session" tem de trazer hasAdvertiserAccess — é o campo que o
+            // frontend usa para decidir redirect pós-login para /anunciante vs /.
+            .body("data.session.hasAdvertiserAccess", notNullValue())
+            .body("data.session.sub", notNullValue());
     }
 
     @Test

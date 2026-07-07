@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.auth.application.*;
+import pt.properia.api.modules.auth.application.dto.AuthUserSummaryDto;
 import pt.properia.api.modules.auth.application.dto.SessionUserDto;
 import pt.properia.api.modules.auth.infrastructure.PasswordService;
 import pt.properia.api.modules.auth.interfaces.request.*;
@@ -99,10 +100,19 @@ public class AuthController {
             Integer.toHexString(token.hashCode()), ipAddress, userAgent, jwtProps.getTtlSeconds());
 
         setSessionCookie(response, token);
+        var userSummary = new AuthUserSummaryDto(
+            session.sub(), session.email(), session.name(), session.role(), session.avatarUrl()
+        );
         var sessionData = new HashMap<String, Object>();
+        sessionData.put("sub", session.sub());
+        sessionData.put("email", session.email());
+        sessionData.put("name", session.name());
+        sessionData.put("role", session.role());
+        sessionData.put("avatarUrl", session.avatarUrl());
+        sessionData.put("hasAdvertiserAccess", session.hasAdvertiserAccess());
         sessionData.put("activeAdvertiserId", session.activeAdvertiserId());
         return ResponseEntity.ok(Map.of("data", Map.of(
-            "user", session,
+            "user", userSummary,
             "session", sessionData
         )));
     }
