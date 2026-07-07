@@ -301,6 +301,18 @@ public class JdbcSearchRepository implements SearchRepository {
             }
         }
 
+        // Estilo arquitetónico — via Vision AI (listing_ai_vision). Sem coluna nova.
+        // Match no estilo principal OU em qualquer estilo detetado. Normaliza mediterranico→mediterraneo.
+        if (p.estilos() != null && !p.estilos().isEmpty()) {
+            var norm = p.estilos().stream()
+                .map(s -> "mediterranico".equals(s) ? "mediterraneo" : s)
+                .toArray(String[]::new);
+            parts.add("EXISTS (SELECT 1 FROM properia.listing_ai_vision v WHERE v.listing_id = l.id "
+                + "AND (v.style_primary = ANY(:estilos) "
+                + "OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(v.styles_detected) sd WHERE sd = ANY(:estilos))))");
+            params.put("estilos", norm);
+        }
+
         // Room-specific filters (join only when needed)
         boolean needsRoomJoin = p.roomHasPrivateBathroom() || p.roomBillsIncluded()
             || p.roomInternetIncluded() || p.roomCoupleAllowed() || p.roomIsExterior()
