@@ -313,6 +313,12 @@ public class JdbcSearchRepository implements SearchRepository {
             params.put("estilos", norm);
         }
 
+        // Terreno — classe de solo/uso (#2).
+        if (p.landTypes() != null && !p.landTypes().isEmpty()) {
+            parts.add("l.land_type = ANY(:landTypes)");
+            params.put("landTypes", p.landTypes().toArray(String[]::new));
+        }
+
         // Room-specific filters (join only when needed)
         boolean needsRoomJoin = p.roomHasPrivateBathroom() || p.roomBillsIncluded()
             || p.roomInternetIncluded() || p.roomCoupleAllowed() || p.roomIsExterior()

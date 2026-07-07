@@ -103,6 +103,19 @@ public class Listing {
     @Column(name = "lot_area_m2", precision = 10, scale = 2)
     private BigDecimal lotAreaM2;
 
+    // Atributos específicos por tipo (V56) — todos opcionais.
+    @Column(name = "land_type")
+    private String landType;              // urbano | urbanizavel | rustico | agricola
+
+    @Column(name = "ceiling_height_m", precision = 4, scale = 2)
+    private BigDecimal ceilingHeightM;    // pé-direito (comercial)
+
+    @Column(name = "water_source")
+    private String waterSource;           // rede | furo | poco | none (quinta/terreno)
+
+    @Column(name = "agricultural_use")
+    private Boolean agriculturalUse;      // uso agrícola declarado
+
     @Column(name = "floor_number")
     private Integer floorNumber;
 
@@ -328,6 +341,10 @@ public class Listing {
     public BigDecimal getUsableAreaM2() { return usableAreaM2; }
     public BigDecimal getGrossAreaM2() { return grossAreaM2; }
     public BigDecimal getLotAreaM2() { return lotAreaM2; }
+    public String getLandType() { return landType; }
+    public BigDecimal getCeilingHeightM() { return ceilingHeightM; }
+    public String getWaterSource() { return waterSource; }
+    public Boolean getAgriculturalUse() { return agriculturalUse; }
     public Integer getFloorNumber() { return floorNumber; }
     public Integer getTotalFloors() { return totalFloors; }
     public Integer getConstructionYear() { return constructionYear; }
@@ -417,6 +434,10 @@ public class Listing {
     public void setUsableAreaM2(BigDecimal usableAreaM2) { this.usableAreaM2 = usableAreaM2; }
     public void setGrossAreaM2(BigDecimal grossAreaM2) { this.grossAreaM2 = grossAreaM2; }
     public void setLotAreaM2(BigDecimal lotAreaM2) { this.lotAreaM2 = lotAreaM2; }
+    public void setLandType(String landType) { this.landType = landType; }
+    public void setCeilingHeightM(BigDecimal ceilingHeightM) { this.ceilingHeightM = ceilingHeightM; }
+    public void setWaterSource(String waterSource) { this.waterSource = waterSource; }
+    public void setAgriculturalUse(Boolean agriculturalUse) { this.agriculturalUse = agriculturalUse; }
     public void setFloorNumber(Integer floorNumber) { this.floorNumber = floorNumber; }
     public void setTotalFloors(Integer totalFloors) { this.totalFloors = totalFloors; }
     public void setConstructionYear(Integer constructionYear) { this.constructionYear = constructionYear; }

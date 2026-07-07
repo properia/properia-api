@@ -110,6 +110,10 @@ public class PatchListingService {
         if (body.containsKey("usableAreaM2")) listing.setUsableAreaM2(decimal(body, "usableAreaM2"));
         if (body.containsKey("grossAreaM2")) listing.setGrossAreaM2(decimal(body, "grossAreaM2"));
         if (body.containsKey("lotAreaM2")) listing.setLotAreaM2(decimal(body, "lotAreaM2"));
+        if (body.containsKey("landType")) listing.setLandType(str(body, "landType"));
+        if (body.containsKey("ceilingHeightM")) listing.setCeilingHeightM(decimal(body, "ceilingHeightM"));
+        if (body.containsKey("waterSource")) listing.setWaterSource(str(body, "waterSource"));
+        if (body.containsKey("agriculturalUse")) listing.setAgriculturalUse(bool(body, "agriculturalUse"));
         if (body.containsKey("floorNumber")) listing.setFloorNumber(intOrNull(body, "floorNumber"));
         if (body.containsKey("totalFloors")) listing.setTotalFloors(intOrNull(body, "totalFloors"));
         if (body.containsKey("constructionYear")) listing.setConstructionYear(intOrNull(body, "constructionYear"));
@@ -436,6 +440,10 @@ public class PatchListingService {
         resp.put("usableAreaM2", saved.getUsableAreaM2() != null ? saved.getUsableAreaM2().toPlainString() : null);
         resp.put("grossAreaM2", saved.getGrossAreaM2() != null ? saved.getGrossAreaM2().toPlainString() : null);
         resp.put("lotAreaM2", saved.getLotAreaM2() != null ? saved.getLotAreaM2().toPlainString() : null);
+        resp.put("landType", saved.getLandType());
+        resp.put("ceilingHeightM", saved.getCeilingHeightM() != null ? saved.getCeilingHeightM().toPlainString() : null);
+        resp.put("waterSource", saved.getWaterSource());
+        resp.put("agriculturalUse", saved.getAgriculturalUse());
         resp.put("floorNumber", saved.getFloorNumber());
         resp.put("totalFloors", saved.getTotalFloors());
         resp.put("constructionYear", saved.getConstructionYear());
@@ -549,6 +557,10 @@ public class PatchListingService {
         resp.put("usableAreaM2", l.getUsableAreaM2() != null ? l.getUsableAreaM2().toPlainString() : null);
         resp.put("grossAreaM2", l.getGrossAreaM2() != null ? l.getGrossAreaM2().toPlainString() : null);
         resp.put("lotAreaM2", l.getLotAreaM2() != null ? l.getLotAreaM2().toPlainString() : null);
+        resp.put("landType", l.getLandType());
+        resp.put("ceilingHeightM", l.getCeilingHeightM() != null ? l.getCeilingHeightM().toPlainString() : null);
+        resp.put("waterSource", l.getWaterSource());
+        resp.put("agriculturalUse", l.getAgriculturalUse());
         resp.put("floorNumber", l.getFloorNumber());
         resp.put("totalFloors", l.getTotalFloors());
         resp.put("constructionYear", l.getConstructionYear());

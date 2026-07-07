@@ -28,6 +28,10 @@ public class UpdateListingUseCase {
         BigDecimal usableAreaM2,
         BigDecimal grossAreaM2,
         BigDecimal lotAreaM2,
+        String landType,
+        BigDecimal ceilingHeightM,
+        String waterSource,
+        Boolean agriculturalUse,
         Integer floorNumber,
         Integer totalFloors,
         Integer constructionYear,
@@ -67,6 +71,10 @@ public class UpdateListingUseCase {
         listing.setUsableAreaM2(cmd.usableAreaM2());
         listing.setGrossAreaM2(cmd.grossAreaM2());
         listing.setLotAreaM2(cmd.lotAreaM2());
+        listing.setLandType(cmd.landType());
+        listing.setCeilingHeightM(cmd.ceilingHeightM());
+        listing.setWaterSource(cmd.waterSource());
+        listing.setAgriculturalUse(cmd.agriculturalUse());
         listing.setFloorNumber(cmd.floorNumber());
         listing.setTotalFloors(cmd.totalFloors());
         listing.setConstructionYear(cmd.constructionYear());
