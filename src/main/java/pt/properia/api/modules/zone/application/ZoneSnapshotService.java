@@ -255,12 +255,19 @@ public class ZoneSnapshotService {
             : String.join(" · ", highlights) + ".";
     }
 
+    /**
+     * Rótulo FACTUAL e verificável em vez de juízo de valor. Os rótulos antigos ("Zona
+     * muito bem servida", "bem servida") eram afirmações avaliativas geradas pelo Properia
+     * (não pelo anunciante) sobre dados OpenStreetMap não verificados — risco de prática
+     * comercial enganosa (DL 57/2008). Passamos a afirmar apenas o que é contável e
+     * confirmável: nº de tipos de serviço com POIs no raio de 500 m. Ver migração V58
+     * (backfill dos rótulos avaliativos já existentes).
+     */
     private static String buildZoneLabel(List<OverpassPoiClient.CategoryResult> results) {
         long categoriesWithPois = results.stream().filter(r -> r.totalCount() > 0).count();
-        if (categoriesWithPois >= 6) return "Zona muito bem servida";
-        if (categoriesWithPois >= 4) return "Zona bem servida";
-        if (categoriesWithPois >= 2) return "Zona com serviços básicos";
-        return "Zona residencial";
+        if (categoriesWithPois <= 0) return "Zona residencial";
+        if (categoriesWithPois == 1) return "1 tipo de serviço a menos de 500 m";
+        return categoriesWithPois + " tipos de serviço a menos de 500 m";
     }
 
     private static String normalizePrecision(String precision) {
