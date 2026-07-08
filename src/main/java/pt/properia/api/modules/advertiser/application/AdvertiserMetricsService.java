@@ -20,6 +20,7 @@ public class AdvertiserMetricsService {
     public record FinancialDto(long pipelineValue, long proposalValue, long wonValue,
                                long averageProposalValue, double proposalToWinRate) {}
     public record SourceBreakdownItem(String source, int total) {}
+    public record CloseReasonItem(String reason, int total) {}
 
     public record MetricsDto(
         int leadsTotal, int leadsFresh, int leadsLate, int leadsUnread,
@@ -36,6 +37,7 @@ public class AdvertiserMetricsService {
         var d1 = now.minus(1, ChronoUnit.DAYS);
         var d7 = now.minus(7, ChronoUnit.DAYS);
         var d30 = now.minus(30, ChronoUnit.DAYS);
+        final String srcParam = (source != null && !source.equals("todas")) ? source : null;
 
         // leads by stage, source, created_at, listing price
         var leadRows = jdbc.sql("""
@@ -115,10 +117,68 @@ public class AdvertiserMetricsService {
             .map(e -> new SourceBreakdownItem(e.getKey(), e.getValue()))
             .toList();
 
-        double visitConversionRate = total > 0 ? Math.round((double) (visitsRequested + visitsConfirmed) / total * 1000) / 10.0 : 0;
+        // Leads DISTINTOS com pelo menos uma visita (qualquer estado, incluindo 'completed').
+        // Antes usava-se (visitsRequested + visitsConfirmed): contava VISITAS, não leads → a
+        // taxa podia passar de 100% (1 lead com 2 visitas = 200%) e excluía visitas já
+        // concluídas — o melhor desfecho — fazendo a taxa CAIR à medida que se trabalhava bem.
+        long leadsWithVisit = jdbc.sql("""
+                SELECT COUNT(DISTINCT v.lead_id)
+                FROM properia.visits v
+                JOIN properia.leads l ON l.id = v.lead_id
+                WHERE v.advertiser_id = :adv
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                """)
+            .param("adv", advertiserId).param("source", srcParam)
+            .query(Long.class).single();
+
+        // Tempo médio (min) até à 1ª resposta do anunciante = 1º de (resposta comercial
+        // registada | mensagem outbound no chat) menos a criação do lead. Antes vinha
+        // sempre null (hardcoded) → o KPI "1ª resposta" mostrava sempre "—".
+        Integer avgFirstResponseMinutes = jdbc.sql("""
+                SELECT ROUND(AVG(EXTRACT(EPOCH FROM (fr.first_response - l.created_at)) / 60.0))::int
+                FROM properia.leads l
+                JOIN (
+                    SELECT lead_id, MIN(created_at) AS first_response
+                    FROM (
+                        SELECT lead_id, created_at FROM properia.lead_responses WHERE advertiser_id = :adv
+                        UNION ALL
+                        SELECT lead_id, created_at FROM properia.chat_messages
+                         WHERE advertiser_id = :adv AND sender_type::text = 'advertiser_member' AND lead_id IS NOT NULL
+                    ) r
+                    GROUP BY lead_id
+                ) fr ON fr.lead_id = l.id
+                WHERE l.advertiser_id = :adv
+                  AND fr.first_response >= l.created_at
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                """)
+            .param("adv", advertiserId).param("source", srcParam)
+            .query(Integer.class).optional().orElse(null);
+
+        // Motivos de não avanço — agregados de leads.metadata->>'closeReason'. Antes devolvia
+        // List.of() fixo → a secção estava sempre vazia apesar de os dados existirem.
+        List<Object> closeReasons = jdbc.sql("""
+                SELECT l.metadata->>'closeReason' AS reason, COUNT(*) AS total
+                FROM properia.leads l
+                WHERE l.advertiser_id = :adv
+                  AND l.metadata->>'closeReason' IS NOT NULL
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                GROUP BY l.metadata->>'closeReason'
+                ORDER BY total DESC
+                """)
+            .param("adv", advertiserId).param("source", srcParam)
+            .query((rs, n) -> (Object) new CloseReasonItem(rs.getString("reason"), (int) rs.getLong("total")))
+            .list();
+
+        double visitConversionRate = total > 0 ? Math.round((double) leadsWithVisit / total * 1000) / 10.0 : 0;
         double winRate = total > 0 ? Math.round((double) won / total * 1000) / 10.0 : 0;
         long avgProposalValue = proposal > 0 ? proposalValue / proposal : 0;
-        double proposalToWinRate = proposal > 0 ? Math.round((double) won / proposal * 1000) / 10.0 : 0;
+        // "Proposta → fecho": denominador = leads que ALGUMA VEZ chegaram a proposta. Como o
+        // funil é forward-only, aproxima-se por (won + proposta_atual) — antes usava só
+        // 'proposal' (fase atual), que exclui precisamente os que converteram para 'won',
+        // inflando a taxa (ex.: 4 ganhas / 6 em proposta = 67% em vez de 4/10 = 40%) e
+        // devolvendo 0% quando todas convertem (0 em proposta).
+        long proposalsEverReached = won + proposal;
+        double proposalToWinRate = proposalsEverReached > 0 ? Math.round((double) won / proposalsEverReached * 1000) / 10.0 : 0;
 
         // CRM contract expresses responseRate as a 0–100 percentage (see AdvertiserMetricsResponse).
         // Same underlying definition as Pulse's responseRate (leads that moved past 'new'/'lost'),
@@ -133,13 +193,13 @@ public class AdvertiserMetricsService {
             0,
             (int) visitsRequested, (int) visitsConfirmed,
             visitConversionRate, winRate,
-            responseRate, null,
+            responseRate, avgFirstResponseMinutes,
             Map.of("new", nw, "contacted", contacted, "qualified", qualified,
                    "proposal", proposal, "won", won, "lost", lost),
             new CohortDto(today, last7, last30),
             new FinancialDto(pipelineValue, proposalValue, wonValue, avgProposalValue, proposalToWinRate),
             breakdown,
-            List.of()
+            closeReasons
         );
     }
 
