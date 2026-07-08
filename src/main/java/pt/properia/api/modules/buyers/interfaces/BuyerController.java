@@ -5,6 +5,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.buyers.application.BuyerService;
 import pt.properia.api.shared.domain.DomainException;
+import pt.properia.api.shared.infrastructure.web.PlanAccessGuard;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
 import java.util.Map;
@@ -15,9 +16,11 @@ import java.util.UUID;
 public class BuyerController {
 
     private final BuyerService buyerService;
+    private final PlanAccessGuard planGuard;
 
-    public BuyerController(BuyerService buyerService) {
+    public BuyerController(BuyerService buyerService, PlanAccessGuard planGuard) {
         this.buyerService = buyerService;
+        this.planGuard = planGuard;
     }
 
     @GetMapping
@@ -89,6 +92,8 @@ public class BuyerController {
         if (claims == null || claims.activeAdvertiserId() == null) {
             throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
         }
+        // Carteira de compradores é uma funcionalidade Pro+ — impor no servidor, não só na UI.
+        planGuard.requireProFeatures(claims.activeAdvertiserId());
         // Sales role sees only their own leads
         UUID scopedUserId = "sales".equals(claims.role()) ? claims.userId() : null;
         return new AccessContext(claims.activeAdvertiserId(), scopedUserId);

@@ -21,13 +21,16 @@ public class PublishListingUseCase {
     private final ListingRepository repository;
     private final ZoneSnapshotService zoneSnapshotService;
     private final JdbcClient jdbc;
+    private final ListingPublishReadinessValidator readinessValidator;
 
     public PublishListingUseCase(ListingRepository repository,
                                   ZoneSnapshotService zoneSnapshotService,
-                                  JdbcClient jdbc) {
+                                  JdbcClient jdbc,
+                                  ListingPublishReadinessValidator readinessValidator) {
         this.repository          = repository;
         this.zoneSnapshotService = zoneSnapshotService;
         this.jdbc                = jdbc;
+        this.readinessValidator  = readinessValidator;
     }
 
     public record Command(UUID listingId, UUID advertiserId) {}
@@ -39,6 +42,8 @@ public class PublishListingUseCase {
         if ("archived".equals(listing.getStatus())) {
             throw new DomainException("INVALID_STATUS", "Um anúncio arquivado não pode ser publicado.");
         }
+
+        readinessValidator.assertReadyToPublish(listing);
 
         var now = Instant.now();
         var isFirstPublish = listing.getFirstPublishedAt() == null;

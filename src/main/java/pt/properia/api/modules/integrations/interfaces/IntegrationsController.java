@@ -15,9 +15,12 @@ import java.util.UUID;
 public class IntegrationsController {
 
     private final IntegrationsService integrationsService;
+    private final pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard;
 
-    public IntegrationsController(IntegrationsService integrationsService) {
+    public IntegrationsController(IntegrationsService integrationsService,
+                                 pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard) {
         this.integrationsService = integrationsService;
+        this.planGuard = planGuard;
     }
 
     @GetMapping
@@ -78,6 +81,8 @@ public class IntegrationsController {
         if (claims == null || claims.activeAdvertiserId() == null) {
             throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
         }
+        // Canais automáticos / integrações são Business — impor no servidor.
+        planGuard.requireBusinessFeatures(claims.activeAdvertiserId());
         return claims.activeAdvertiserId();
     }
 }

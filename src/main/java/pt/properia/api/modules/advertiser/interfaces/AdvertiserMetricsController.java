@@ -14,9 +14,12 @@ import java.util.UUID;
 public class AdvertiserMetricsController {
 
     private final AdvertiserMetricsService metricsService;
+    private final pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard;
 
-    public AdvertiserMetricsController(AdvertiserMetricsService metricsService) {
+    public AdvertiserMetricsController(AdvertiserMetricsService metricsService,
+                                      pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard) {
         this.metricsService = metricsService;
+        this.planGuard = planGuard;
     }
 
     @GetMapping("/api/advertiser/metrics")
@@ -45,6 +48,8 @@ public class AdvertiserMetricsController {
     @GetMapping("/api/advertiser/pulse")
     public ResponseEntity<?> getPulse(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+        // Radar comercial (pulse) é Pro+ — os restantes /metrics do dashboard são de todos os planos.
+        planGuard.requireProFeatures(advertiserId);
         var data = metricsService.getPulse(advertiserId);
         return ResponseEntity.ok(Map.of("data", data));
     }

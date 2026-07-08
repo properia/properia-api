@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import pt.properia.api.modules.enrichment.vision.infrastructure.OpenAIProperties;
 import pt.properia.api.shared.domain.DomainException;
+import pt.properia.api.shared.infrastructure.web.PlanAccessGuard;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
 import java.io.OutputStreamWriter;
@@ -49,11 +50,14 @@ public class CopilotoController {
     private final OpenAIProperties openAiProps;
     private final ObjectMapper json;
     private final HttpClient http;
+    private final PlanAccessGuard planGuard;
 
-    public CopilotoController(JdbcClient jdbc, OpenAIProperties openAiProps, ObjectMapper json) {
+    public CopilotoController(JdbcClient jdbc, OpenAIProperties openAiProps, ObjectMapper json,
+                             PlanAccessGuard planGuard) {
         this.jdbc = jdbc;
         this.openAiProps = openAiProps;
         this.json = json;
+        this.planGuard = planGuard;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .build();
@@ -70,6 +74,8 @@ public class CopilotoController {
         if (!openAiProps.isConfigured()) {
             throw new DomainException("AI_UNAVAILABLE", "O assistente IA não está configurado neste ambiente.", 503);
         }
+        // Copiloto é Pro+ — impor no servidor (a IA consome tokens à nossa custa).
+        planGuard.requireProFeatures(claims.activeAdvertiserId());
 
         var advertiserId = claims.activeAdvertiserId();
         var question = body.getOrDefault("question", "").toString().trim();
@@ -313,6 +319,8 @@ public class CopilotoController {
         if (!openAiProps.isConfigured()) {
             throw new DomainException("AI_UNAVAILABLE", "O assistente IA não está configurado neste ambiente.", 503);
         }
+        // Copiloto é Pro+ — impor no servidor (a IA consome tokens à nossa custa).
+        planGuard.requireProFeatures(claims.activeAdvertiserId());
 
         var advertiserId = claims.activeAdvertiserId();
         var question = body.getOrDefault("question", "").toString().trim();

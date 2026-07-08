@@ -28,11 +28,14 @@ public class AdvertiserChatController {
     private final ChatService chatService;
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
+    private final pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard;
 
-    public AdvertiserChatController(ChatService chatService, JdbcClient jdbc, ObjectMapper objectMapper) {
+    public AdvertiserChatController(ChatService chatService, JdbcClient jdbc, ObjectMapper objectMapper,
+                                   pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard) {
         this.chatService = chatService;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.planGuard = planGuard;
     }
 
     @GetMapping("/conversations")
@@ -274,6 +277,8 @@ public class AdvertiserChatController {
         if (claims == null || claims.activeAdvertiserId() == null) {
             throw new DomainException("FORBIDDEN", "Sem acesso a anunciante.", 403);
         }
+        // Chat com interessados é Pro+ — impor no servidor, não só na UI.
+        planGuard.requireProFeatures(claims.activeAdvertiserId());
         return claims.activeAdvertiserId();
     }
 }

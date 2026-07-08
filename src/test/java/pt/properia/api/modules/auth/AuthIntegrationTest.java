@@ -68,6 +68,35 @@ class AuthIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    void switch_advertiser_without_membership_returns_403() {
+        // Regressão (OWASP A01): antes, qualquer utilizador autenticado podia trocar para
+        // QUALQUER advertiserId e assumir o contexto dessa imobiliária. Agora tem de haver
+        // membership real — trocar para um advertiser aleatório deve dar 403.
+        given().contentType(ContentType.JSON)
+            .body("""
+                {"name":"Switch User","email":"switch@example.com","password":"Password123","marketingConsent":false}
+                """)
+            .post("/api/auth/register").then().statusCode(201);
+
+        var cookie = given().contentType(ContentType.JSON)
+            .body("""
+                {"email":"switch@example.com","password":"Password123"}
+                """)
+            .post("/api/auth/login")
+            .then().statusCode(200)
+            .extract().cookie("properia_session");
+
+        given().contentType(ContentType.JSON)
+            .cookie("properia_session", cookie)
+            .body("{\"advertiserId\":\"" + java.util.UUID.randomUUID() + "\"}")
+        .when()
+            .post("/api/auth/switch-advertiser")
+        .then()
+            .statusCode(403)
+            .body("error.code", equalTo("FORBIDDEN"));
+    }
+
+    @Test
     void login_with_wrong_password_returns_401() {
         given().contentType(ContentType.JSON)
             .body("""

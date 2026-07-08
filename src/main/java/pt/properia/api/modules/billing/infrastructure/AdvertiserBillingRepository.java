@@ -89,6 +89,29 @@ public class AdvertiserBillingRepository {
     }
 
     /**
+     * Debita créditos ATOMICAMENTE, só se houver saldo suficiente — a guarda de saldo
+     * vive na cláusula WHERE do próprio UPDATE (não é check-then-act), por isso duas
+     * chamadas concorrentes nunca conseguem levar o saldo a negativo. Devolve o novo
+     * saldo se debitou, ou empty se o saldo era insuficiente (nada é alterado).
+     */
+    public java.util.Optional<Integer> spendCreditOnce(UUID advertiserId, int amount) {
+        return jdbc.sql("""
+                UPDATE properia.advertisers
+                SET billing_metadata = jsonb_set(
+                        COALESCE(billing_metadata, '{}'::jsonb),
+                        '{creditBalance}',
+                        to_jsonb(COALESCE((billing_metadata->>'creditBalance')::int, 0) - :amount))
+                WHERE id = :id
+                  AND COALESCE((billing_metadata->>'creditBalance')::int, 0) >= :amount
+                RETURNING (billing_metadata->>'creditBalance')::int
+                """)
+            .param("amount", amount)
+            .param("id", advertiserId)
+            .query(Integer.class)
+            .optional();
+    }
+
+    /**
      * Ativa o trial UMA só vez, atomicamente (plano + metadata num único UPDATE guardado).
      * Devolve true se ativou agora, false se já estava ativo (correção #6).
      */

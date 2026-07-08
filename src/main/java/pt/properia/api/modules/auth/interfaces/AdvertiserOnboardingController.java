@@ -63,6 +63,44 @@ public class AdvertiserOnboardingController {
         if (adv == null) throw new DomainException("NOT_FOUND", "Onboarding não iniciado.", 404);
 
         var advertiserId = UUID.fromString((String) adv.get("advertiserId"));
+        var advertiserTypeSelected = (String) adv.get("advertiserTypeSelected");
+
+        // Validação server-side de NIF/AMI — o wizard já valida isto no cliente, mas nada
+        // impedia um PATCH direto de gravar um NIF inválido ou saltar a licença AMI
+        // (obrigatória por lei — Lei n.º 15/2013 — para agências/consultores).
+        if (body.get("taxNumber") != null) {
+            var tax = body.get("taxNumber").toString();
+            if (!tax.isBlank() && !isValidPortugueseTaxNumber(tax)) {
+                throw new DomainException("VALIDATION_ERROR",
+                    "NIF/NIPC inválido. Introduz um número português válido com 9 dígitos.", 422);
+            }
+        }
+        if (body.get("licenseNumber") != null) {
+            var license = body.get("licenseNumber").toString();
+            if (!license.isBlank() && requiresAmiRegistration(advertiserTypeSelected) && !isValidAmiLicenseNumber(license)) {
+                throw new DomainException("VALIDATION_ERROR",
+                    "Número AMI inválido. Usa o formato AMI 6600 ou 6600.", 422);
+            }
+        }
+        // Ao concluir a etapa "commercial_identity", exigir NIF válido sempre e AMI válido
+        // para agência/consultor — sem isto, um PATCH direto com stepCurrent="done" saltava
+        // esta etapa por completo e chegava a publicar anúncios sem identidade fiscal/legal.
+        if ("commercial_identity".equals(body.get("markStepCompleted"))) {
+            var effectiveTax = body.containsKey("taxNumber")
+                ? stringOrNull(body.get("taxNumber")) : (String) adv.get("taxNumber");
+            if (!isValidPortugueseTaxNumber(effectiveTax != null ? effectiveTax : "")) {
+                throw new DomainException("VALIDATION_ERROR",
+                    "É necessário um NIF/NIPC válido para concluir esta etapa.", 422);
+            }
+            if (requiresAmiRegistration(advertiserTypeSelected)) {
+                var effectiveLicense = body.containsKey("licenseNumber")
+                    ? stringOrNull(body.get("licenseNumber")) : (String) adv.get("licenseNumber");
+                if (!isValidAmiLicenseNumber(effectiveLicense != null ? effectiveLicense : "")) {
+                    throw new DomainException("VALIDATION_ERROR",
+                        "É necessário um número AMI válido para concluir esta etapa (obrigatório por lei para mediação imobiliária).", 422);
+                }
+            }
+        }
 
         // ── Update advertisers table ──────────────────────────────────────────
         var advSets = new ArrayList<String>();
@@ -190,6 +228,11 @@ public class AdvertiserOnboardingController {
         var id = UUID.randomUUID();
         var slug = generateSlug(brandName, id);
 
+        // NOTA (não corrigido nesta sessão): todo anunciante nasce com 'verified_basic' sem
+        // qualquer verificação real ter ocorrido — ver PROPERIA_READINESS para detalhe. Não
+        // mudei para 'pending_review' porque não existe NENHUM endpoint/admin que tire um
+        // advertiser desse estado; isso deixaria todos presos "em revisão" para sempre, o que
+        // é pior. Corrigir a sério exige uma fila/UI de revisão (decisão de produto à parte).
         jdbc.sql("""
                 INSERT INTO properia.advertisers
                   (id, brand_name, legal_name, slug, advertiser_type, verification_status, is_active, created_at, updated_at)
@@ -388,5 +431,37 @@ public class AdvertiserOnboardingController {
         if (claims == null || claims.userId() == null) {
             throw new DomainException("UNAUTHORIZED", "Sessão ausente.", 401);
         }
+    }
+
+    private String stringOrNull(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
+    private boolean requiresAmiRegistration(String advertiserType) {
+        return "agency".equals(advertiserType) || "consultant".equals(advertiserType);
+    }
+
+    // Porto fiel de isValidPortugueseTaxNumber (shared/advertiser-verification.ts) — módulo
+    // 11 sobre os primeiros 8 dígitos com pesos 9..2.
+    private boolean isValidPortugueseTaxNumber(String value) {
+        if (value == null) return false;
+        var normalized = value.strip();
+        if (!normalized.matches("\\d{9}")) return false;
+        int checksum = 0;
+        for (int i = 0; i < 8; i++) {
+            checksum += (normalized.charAt(i) - '0') * (9 - i);
+        }
+        int remainder = checksum % 11;
+        int checkDigit = remainder < 2 ? 0 : 11 - remainder;
+        return (normalized.charAt(8) - '0') == checkDigit;
+    }
+
+    // Porto fiel de isValidAmiLicenseNumber — aceita "AMI 6600", "AMI-6600" ou só "6600".
+    private static final java.util.regex.Pattern AMI_LICENSE_PATTERN =
+        java.util.regex.Pattern.compile("^(?:AMI[\\s-]*)?\\d{3,6}$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private boolean isValidAmiLicenseNumber(String value) {
+        if (value == null) return false;
+        return AMI_LICENSE_PATTERN.matcher(value.strip()).matches();
     }
 }

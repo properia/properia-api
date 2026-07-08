@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import pt.properia.api.modules.billing.application.BillingService;
 import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.media.infrastructure.R2UploadService;
 import pt.properia.api.shared.domain.DomainException;
@@ -29,14 +30,16 @@ public class AdvertiserMiscController {
     private final ObjectMapper objectMapper;
     private final R2UploadService r2;
     private final LeadStageAdvancer leadStageAdvancer;
+    private final BillingService billingService;
     private final Path localStorageDir;
 
     public AdvertiserMiscController(JdbcClient jdbc, ObjectMapper objectMapper, R2UploadService r2,
-                                    LeadStageAdvancer leadStageAdvancer) {
+                                    LeadStageAdvancer leadStageAdvancer, BillingService billingService) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.r2 = r2;
         this.leadStageAdvancer = leadStageAdvancer;
+        this.billingService = billingService;
         this.localStorageDir = Paths.get(System.getProperty("java.io.tmpdir"), "properia-uploads");
     }
 
@@ -266,14 +269,41 @@ public class AdvertiserMiscController {
             }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
 
-        if (!Boolean.TRUE.equals(lead.get("alreadyRevealed"))) {
+        boolean alreadyRevealed = Boolean.TRUE.equals(lead.get("alreadyRevealed"));
+        boolean leadsUnlockedByPlan = billingService.hasLeadsUnlockedByPlan(advertiserId);
+        int creditsRemaining;
+
+        if (alreadyRevealed || leadsUnlockedByPlan) {
+            // Sem custo: já foi desbloqueado antes, ou o plano inclui contactos sempre visíveis.
+            if (!alreadyRevealed) {
+                jdbc.sql("""
+                        UPDATE properia.leads SET contact_revealed_at = now(), updated_at = now()
+                        WHERE id = :id
+                        """).param("id", id).update();
+            }
+            creditsRemaining = billingService.getCreditBalance(advertiserId);
+        } else {
+            // Plano Starter sem desbloqueio prévio: debita 1 crédito ATOMICAMENTE. Se não
+            // houver saldo, nada é alterado — o contacto continua bloqueado e devolvemos 402
+            // (o frontend já trata este código com uma mensagem de upsell).
+            var newBalance = billingService.spendLeadRevealCredit(advertiserId, id);
+            if (newBalance.isEmpty()) {
+                throw new DomainException("INSUFFICIENT_CREDITS",
+                    "Sem créditos disponíveis para desbloquear este contacto.", 402);
+            }
             jdbc.sql("""
                     UPDATE properia.leads SET contact_revealed_at = now(), updated_at = now()
                     WHERE id = :id
                     """).param("id", id).update();
+            creditsRemaining = newBalance.get();
         }
 
-        return ResponseEntity.ok(Map.of("data", lead));
+        var result = new LinkedHashMap<String, Object>();
+        result.put("contactName", lead.get("contactName"));
+        result.put("contactEmail", lead.get("contactEmail"));
+        result.put("contactPhone", lead.get("contactPhone"));
+        result.put("creditsRemaining", creditsRemaining);
+        return ResponseEntity.ok(Map.of("data", result));
     }
 
     // ── Lead responses ─────────────────────────────────────────────────────────

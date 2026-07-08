@@ -235,12 +235,15 @@ public class AuthController {
         }
         var advId = UUID.fromString(advertiserId);
 
-        // verify access
-        var hasAccess = authRepository.findUserByEmail(claims.email())
-            .map(u -> true).isPresent();
+        // Verifica MEMBERSHIP real: o utilizador só pode trocar para um advertiser a que
+        // pertence de facto (advertiser_users + advertiser ativo). Sem isto, qualquer utilizador
+        // autenticado assumiria o contexto de qualquer imobiliária (OWASP A01 / RGPD).
+        if (!authRepository.findAccessibleAdvertiserIds(claims.userId()).contains(advId)) {
+            throw new DomainException("FORBIDDEN", "Sem acesso a este anunciante.", 403);
+        }
 
         var newClaims = new JwtClaims(claims.userId(), claims.email(), claims.name(),
-            claims.role(), claims.avatarUrl(), claims.hasAdvertiserAccess(), advId, claims.sessionId());
+            claims.role(), claims.avatarUrl(), true, advId, claims.sessionId());
         var newToken = jwtService.generateToken(newClaims);
         setSessionCookie(response, newToken);
 

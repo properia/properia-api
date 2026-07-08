@@ -102,6 +102,11 @@ public class JpaAuthRepository implements AuthRepository {
     }
 
     @Override
+    public List<UUID> findAccessibleAdvertiserIds(UUID userId) {
+        return advertiserAccess.findAccessibleAdvertiserIds(userId);
+    }
+
+    @Override
     public SessionUserDto buildSessionUser(UUID userId) {
         var user = users.findById(userId).orElseThrow();
         List<UUID> advertiserIds = advertiserAccess.findAccessibleAdvertiserIds(userId);

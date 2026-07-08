@@ -6,12 +6,16 @@ import pt.properia.api.modules.auth.domain.AuthActionToken;
 import pt.properia.api.modules.auth.domain.UserAuthIdentity;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface AuthRepository {
 
     Optional<UserAuthIdentity> findLocalIdentityByEmail(String email);
+
+    /** Advertisers a que este utilizador tem acesso efetivo (membership + advertiser ativo). */
+    List<UUID> findAccessibleAdvertiserIds(UUID userId);
 
     Optional<UserAuthIdentity> findIdentityByProvider(String provider, String providerUserId);
 

@@ -162,6 +162,26 @@ public class BillingService {
             "Créditos de boas-vindas — bem-vindo à Properia!");
     }
 
+    /**
+     * Debita 1 crédito para desbloquear o contacto de um lead. Devolve o novo saldo se
+     * debitou (registando no ledger), ou empty se o saldo era insuficiente — nesse caso
+     * nada é alterado, e o chamador deve devolver 402 ao cliente.
+     */
+    @Transactional
+    public java.util.Optional<Integer> spendLeadRevealCredit(UUID advertiserId, UUID leadId) {
+        var newBalance = billingRepo.spendCreditOnce(advertiserId, 1);
+        newBalance.ifPresent(balance -> billingRepo.addCreditTransaction(
+            advertiserId, "lead_reveal", -1, balance, null,
+            "Desbloqueio de contacto — lead " + leadId));
+        return newBalance;
+    }
+
+    /** Planos Pro e superiores têm os contactos de leads sempre desbloqueados (sem custo). */
+    public boolean hasLeadsUnlockedByPlan(UUID advertiserId) {
+        var planCode = billingRepo.getSnapshot(advertiserId).planCode();
+        return "pro".equals(planCode) || "business".equals(planCode) || "pilot".equals(planCode);
+    }
+
     // ── Plan info ─────────────────────────────────────────────────────────────
 
     public record PlanInfo(String planCode, String paymentStatus, int creditBalance,

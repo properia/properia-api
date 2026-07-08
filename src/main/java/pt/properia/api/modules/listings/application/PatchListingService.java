@@ -23,13 +23,16 @@ public class PatchListingService {
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final ZoneSnapshotService zoneSnapshotService;
+    private final ListingPublishReadinessValidator readinessValidator;
 
     public PatchListingService(ListingRepository repository, JdbcClient jdbc, ObjectMapper json,
-                                ZoneSnapshotService zoneSnapshotService) {
+                                ZoneSnapshotService zoneSnapshotService,
+                                ListingPublishReadinessValidator readinessValidator) {
         this.repository = repository;
         this.jdbc = jdbc;
         this.json = json;
         this.zoneSnapshotService = zoneSnapshotService;
+        this.readinessValidator = readinessValidator;
     }
 
     @SuppressWarnings("unchecked")
@@ -39,16 +42,17 @@ public class PatchListingService {
         final BigDecimal priceBeforePatch = listing.getPriceAmount();
 
         // ── Status ────────────────────────────────────────────────────────────
+        // "published" é adiado: a validação de prontidão (preço/fotos/localização/descrição)
+        // tem de correr DEPOIS dos outros campos deste mesmo PATCH serem aplicados abaixo
+        // (ex.: PATCH com price+status="published" no mesmo pedido) — ver bloco antes do save.
+        boolean wantsToPublish = false;
         if (body.containsKey("status")) {
             var newStatus = str(body, "status");
             switch (newStatus != null ? newStatus : "") {
                 case "published" -> {
                     if ("archived".equals(listing.getStatus()))
                         throw new DomainException("INVALID_STATUS", "Um anúncio arquivado não pode ser publicado.", 409);
-                    var now = Instant.now();
-                    listing.setStatus("published");
-                    listing.setPublishedAt(now);
-                    if (listing.getFirstPublishedAt() == null) listing.setFirstPublishedAt(now);
+                    wantsToPublish = true;
                 }
                 case "archived" -> listing.setStatus("archived");
                 case "draft" -> {
@@ -142,6 +146,16 @@ public class PatchListingService {
         if (body.containsKey("postalCode")) listing.setPostalCode(str(body, "postalCode"));
         if (body.containsKey("latitude")) listing.setLatitude(doubleOrNull(body, "latitude"));
         if (body.containsKey("longitude")) listing.setLongitude(doubleOrNull(body, "longitude"));
+
+        // Publicar só depois de todos os campos acima aplicados — permite validar o estado
+        // final do anúncio mesmo quando o mesmo PATCH também preenche preço/descrição/etc.
+        if (wantsToPublish) {
+            readinessValidator.assertReadyToPublish(listing);
+            var now = Instant.now();
+            listing.setStatus("published");
+            listing.setPublishedAt(now);
+            if (listing.getFirstPublishedAt() == null) listing.setFirstPublishedAt(now);
+        }
 
         var saved = repository.save(listing);
 

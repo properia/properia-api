@@ -16,9 +16,12 @@ import java.util.UUID;
 public class CrmImportController {
 
     private final CrmImportService crmImportService;
+    private final pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard;
 
-    public CrmImportController(CrmImportService crmImportService) {
+    public CrmImportController(CrmImportService crmImportService,
+                             pt.properia.api.shared.infrastructure.web.PlanAccessGuard planGuard) {
         this.crmImportService = crmImportService;
+        this.planGuard = planGuard;
     }
 
     // ── Batches ───────────────────────────────────────────────────────────────
@@ -130,6 +133,8 @@ public class CrmImportController {
         if (claims == null || claims.activeAdvertiserId() == null) {
             throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
         }
+        // Importação de dados é Business — impor no servidor.
+        planGuard.requireBusinessFeatures(claims.activeAdvertiserId());
         return claims.activeAdvertiserId();
     }
 

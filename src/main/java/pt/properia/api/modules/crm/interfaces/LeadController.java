@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.billing.application.BillingService;
 import pt.properia.api.modules.crm.application.lead.*;
 import pt.properia.api.modules.crm.interfaces.request.CreateLeadRequest;
 import pt.properia.api.shared.domain.DomainException;
@@ -28,18 +29,21 @@ public class LeadController {
     private final LeadStageAdvancer leadStageAdvancer;
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
+    private final BillingService billingService;
 
     public LeadController(
             CreateLeadUseCase createLead,
             UpdateLeadStageUseCase updateLeadStage,
             LeadStageAdvancer leadStageAdvancer,
             JdbcClient jdbc,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            BillingService billingService) {
         this.createLead = createLead;
         this.updateLeadStage = updateLeadStage;
         this.leadStageAdvancer = leadStageAdvancer;
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.billingService = billingService;
     }
 
     // ── Public: buyer submits a lead ────────────────────────────────────────
@@ -102,7 +106,7 @@ public class LeadController {
             params.put("assignedTo", assignedToUserId);
         }
         if (q != null && !q.isBlank()) {
-            whereParts.add("(l.contact_name ILIKE :q OR l.contact_email ILIKE :q OR l.message ILIKE :q)");
+            whereParts.add("(l.contact_name ILIKE :q OR l.contact_email ILIKE :q OR l.contact_phone ILIKE :q OR l.message ILIKE :q)");
             params.put("q", "%" + q + "%");
         }
         if (dateFrom != null && !dateFrom.isBlank()) {
@@ -112,6 +116,26 @@ public class LeadController {
         if (dateTo != null && !dateTo.isBlank()) {
             whereParts.add("l.created_at <= :dateTo::timestamptz");
             params.put("dateTo", dateTo);
+        }
+        // slaBucket/priority derivam da idade do lead (mesmos limiares usados no cálculo
+        // do payload abaixo: fresh/low <24h, attention/medium <72h, late/high >=72h).
+        // Têm de ir para o WHERE em SQL — filtrar em memória DEPOIS do LIMIT/OFFSET
+        // corta a página antes do filtro e desalinha o total/totalPages devolvidos.
+        if (slaBucket != null && !slaBucket.isBlank() && !"todas".equals(slaBucket)) {
+            whereParts.add(switch (slaBucket) {
+                case "fresh" -> "l.created_at > now() - interval '24 hours'";
+                case "attention" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'";
+                case "late" -> "l.created_at <= now() - interval '72 hours'";
+                default -> "true";
+            });
+        }
+        if (priority != null && !priority.isBlank() && !"todas".equals(priority)) {
+            whereParts.add(switch (priority) {
+                case "low" -> "l.created_at > now() - interval '24 hours'";
+                case "medium" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'";
+                case "high" -> "l.created_at <= now() - interval '72 hours'";
+                default -> "true";
+            });
         }
 
         var whereClause = "WHERE " + String.join(" AND ", whereParts);
@@ -127,7 +151,8 @@ public class LeadController {
         var listSql = """
                 SELECT l.id, l.listing_id, l.advertiser_id, l.source, l.stage,
                        l.intent_type, l.message, l.contact_name, l.contact_email,
-                       l.contact_phone, l.assigned_to, l.metadata, l.created_at, l.updated_at,
+                       l.contact_phone, l.contact_revealed_at, l.assigned_to, l.metadata,
+                       l.created_at, l.updated_at,
                        li.id AS li_id, li.public_id AS li_public_id,
                        li.title AS li_title, li.business_type AS li_business_type,
                        li.status AS li_status, li.city AS li_city, li.district AS li_district
@@ -137,6 +162,10 @@ public class LeadController {
         var listQuery = jdbc.sql(listSql);
         for (var e : params.entrySet()) listQuery = listQuery.param(e.getKey(), e.getValue());
         listQuery = listQuery.param("lim", safePageSize).param("off", offset);
+
+        // Planos Pro+ têm os contactos sempre desbloqueados; Starter precisa de créditos
+        // (ver /leads/{id}/reveal). Calculado uma vez para a página inteira — não por lead.
+        boolean leadsUnlockedByPlan = billingService.hasLeadsUnlockedByPlan(advertiserId);
 
         var now = java.time.Instant.now();
         var items = listQuery.query((rs, n) -> {
@@ -148,10 +177,16 @@ public class LeadController {
             m.put("stage", rs.getString("stage"));
             m.put("intentType", rs.getString("intent_type") != null ? rs.getString("intent_type") : "");
             m.put("message", rs.getString("message"));
-            m.put("contactName", rs.getString("contact_name"));
-            m.put("contactEmail", rs.getString("contact_email"));
-            m.put("contactPhone", rs.getString("contact_phone"));
-            m.put("isLocked", false);
+
+            // Contacto só sai em claro se o plano já o desbloqueia por omissão, ou se este
+            // lead específico já foi pago/desbloqueado antes (contact_revealed_at). Caso
+            // contrário, mascarado no servidor — a versão anterior enviava sempre os dados
+            // reais e confiava só na UI para escondê-los (visível no Network tab).
+            boolean isLocked = !leadsUnlockedByPlan && rs.getTimestamp("contact_revealed_at") == null;
+            m.put("isLocked", isLocked);
+            m.put("contactName", isLocked ? maskName(rs.getString("contact_name")) : rs.getString("contact_name"));
+            m.put("contactEmail", isLocked ? maskEmail(rs.getString("contact_email")) : rs.getString("contact_email"));
+            m.put("contactPhone", isLocked ? maskPhone(rs.getString("contact_phone")) : rs.getString("contact_phone"));
             m.put("responseCount", 0);
             m.put("lastResponseAt", null);
             m.put("hasDecisionDossier", false);
@@ -213,14 +248,6 @@ public class LeadController {
 
             return (Map<String, Object>) m;
         }).list();
-
-        // Apply slaBucket filter after computation (can't do it in SQL easily)
-        if (slaBucket != null && !slaBucket.isBlank() && !"todas".equals(slaBucket)) {
-            items = items.stream().filter(item -> slaBucket.equals(item.get("slaBucket"))).toList();
-        }
-        if (priority != null && !priority.isBlank() && !"todas".equals(priority)) {
-            items = items.stream().filter(item -> priority.equals(item.get("priority"))).toList();
-        }
 
         // ── Enriquecimento (em lote, sem N+1): conversa de chat, respostas comerciais e timeline ──
         // O contrato do FE espera conversation/responseCount/lastResponseAt/timeline reais.
@@ -413,6 +440,7 @@ public class LeadController {
     public ResponseEntity<?> getLead(@PathVariable UUID id,
                                      @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+        boolean leadsUnlockedByPlan = billingService.hasLeadsUnlockedByPlan(advertiserId);
         var lead = jdbc.sql("""
                 SELECT l.*, li.title as listing_title, li.hero_image_url as listing_hero_image
                 FROM properia.leads l
@@ -425,9 +453,11 @@ public class LeadController {
                 m.put("advertiserId", rs.getString("advertiser_id"));
                 m.put("listingId", rs.getString("listing_id"));
                 m.put("listingTitle", rs.getString("listing_title"));
-                m.put("contactName", rs.getString("contact_name"));
-                m.put("contactEmail", rs.getString("contact_email"));
-                m.put("contactPhone", rs.getString("contact_phone"));
+                boolean isLocked = !leadsUnlockedByPlan && rs.getTimestamp("contact_revealed_at") == null;
+                m.put("isLocked", isLocked);
+                m.put("contactName", isLocked ? maskName(rs.getString("contact_name")) : rs.getString("contact_name"));
+                m.put("contactEmail", isLocked ? maskEmail(rs.getString("contact_email")) : rs.getString("contact_email"));
+                m.put("contactPhone", isLocked ? maskPhone(rs.getString("contact_phone")) : rs.getString("contact_phone"));
                 m.put("stage", rs.getString("stage"));
                 m.put("source", rs.getString("source"));
                 m.put("internalNotes", null);
@@ -528,5 +558,49 @@ public class LeadController {
             throw new DomainException("FORBIDDEN", "Sem acesso a anunciante.", 403);
         }
         return claims.activeAdvertiserId();
+    }
+
+    // ── Mascaramento de contacto (leads bloqueados) ─────────────────────────────
+    // Porto fiel de maskName/maskEmail/maskPhone do frontend (advertiser-leads-page.tsx),
+    // para o "teaser" continuar igual mas sem nunca sair PII em claro do servidor para
+    // quem não tem direito a vê-la.
+
+    private static String maskName(String name) {
+        if (name == null || name.isBlank()) return "Nome protegido";
+        var parts = name.strip().split("\\s+");
+        if (parts.length == 1) return maskWord(parts[0]);
+        var sb = new StringBuilder(parts[0]);
+        for (int i = 1; i < parts.length; i++) sb.append(' ').append(maskWord(parts[i]));
+        return sb.toString();
+    }
+
+    private static String maskWord(String word) {
+        int dots = Math.max(2, Math.min(5, word.length() - 1));
+        return word.substring(0, 1) + "•".repeat(dots);
+    }
+
+    private static String maskEmail(String email) {
+        if (email == null || email.isBlank()) return "Email protegido";
+        int atIdx = email.indexOf('@');
+        if (atIdx < 0) return "Email protegido";
+        var local = email.substring(0, atIdx);
+        var domain = email.substring(atIdx + 1);
+        int dotIdx = domain.indexOf('.');
+        var domainName = dotIdx < 0 ? domain : domain.substring(0, dotIdx);
+        var tld = dotIdx < 0 ? "" : domain.substring(dotIdx + 1);
+        var safeLocal = local.length() <= 2
+            ? (local.isEmpty() ? "•" : local.substring(0, 1)) + "•"
+            : local.substring(0, 2) + "•••";
+        var safeDomain = domainName.length() <= 2
+            ? (domainName.isEmpty() ? "•" : domainName.substring(0, 1)) + "•"
+            : domainName.substring(0, 2) + "•••";
+        return safeLocal + "@" + safeDomain + (tld.isBlank() ? "" : "." + tld);
+    }
+
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.isBlank()) return "Telefone protegido";
+        var digits = phone.replaceAll("\\D", "");
+        if (digits.length() < 4) return "Telefone protegido";
+        return "+" + digits.substring(0, 3) + " ••• ••• " + digits.substring(digits.length() - 3);
     }
 }
