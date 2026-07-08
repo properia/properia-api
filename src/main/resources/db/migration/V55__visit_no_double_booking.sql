@@ -7,6 +7,20 @@
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
+-- O operador timestamptz + interval é classificado STABLE (não IMMUTABLE) no catálogo do
+-- Postgres, mesmo para um intervalo fixo como '60 minutes' — por isso não pode ser usado
+-- diretamente dentro de uma expressão de índice (EXCLUDE USING gist mais abaixo rejeita
+-- com "functions in index expression must be marked IMMUTABLE"). Este wrapper declara
+-- explicitamente IMMUTABLE, o que é seguro aqui: para esta função, o resultado depende
+-- só dos argumentos (não há calendário/fuso variável envolvido, é uma duração fixa).
+CREATE OR REPLACE FUNCTION properia.visit_effective_range(p_starts_at timestamptz, p_ends_at timestamptz)
+RETURNS tstzrange
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT tstzrange(p_starts_at, COALESCE(p_ends_at, p_starts_at + interval '60 minutes'), '[)')
+$$;
+
 -- Resolver sobreposições de visitas confirmadas pré-existentes (senão o ADD CONSTRAINT falha):
 -- mantém, em cada grupo sobreposto, a de id menor (determinístico) e expira as restantes.
 WITH ranked AS (
@@ -34,5 +48,5 @@ ALTER TABLE properia.visits
     ADD CONSTRAINT visits_no_overlap_confirmed
     EXCLUDE USING gist (
         advertiser_id WITH =,
-        tstzrange(starts_at, COALESCE(ends_at, starts_at + interval '60 minutes'), '[)') WITH &&
+        properia.visit_effective_range(starts_at, ends_at) WITH &&
     ) WHERE (status = 'confirmed');
