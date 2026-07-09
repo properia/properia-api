@@ -78,7 +78,7 @@ public class AdvertiserBillingRepository {
                             to_jsonb(COALESCE((billing_metadata->>'creditBalance')::int, 0) + :amount)),
                         '{welcomeCreditsGrantedAt}', to_jsonb(:now::text))
                 WHERE id = :id
-                  AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'welcomeCreditsGrantedAt')
+                  AND NOT jsonb_exists(COALESCE(billing_metadata, '{}'::jsonb), 'welcomeCreditsGrantedAt')
                 RETURNING (billing_metadata->>'creditBalance')::int
                 """)
             .param("amount", amount)
@@ -123,7 +123,7 @@ public class AdvertiserBillingRepository {
                     SET plan_code = :plan,
                         billing_metadata = COALESCE(billing_metadata, '{}'::jsonb) || :patch::jsonb
                     WHERE id = :id
-                      AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'trialActivatedAt')
+                      AND NOT jsonb_exists(COALESCE(billing_metadata, '{}'::jsonb), 'trialActivatedAt')
                     """)
                 .param("plan", planCode)
                 .param("patch", json)
@@ -166,7 +166,7 @@ public class AdvertiserBillingRepository {
                             COALESCE(billing_metadata, '{}'::jsonb),
                             '{stripeCustomerId}', to_jsonb(:cid::text))
                     WHERE id = :id
-                      AND NOT (COALESCE(billing_metadata, '{}'::jsonb) ? 'stripeCustomerId')
+                      AND NOT jsonb_exists(COALESCE(billing_metadata, '{}'::jsonb), 'stripeCustomerId')
                     RETURNING billing_metadata->>'stripeCustomerId' AS cid
                 )
                 SELECT cid FROM upd

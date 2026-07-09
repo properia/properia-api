@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,6 +24,8 @@ import java.util.*;
 public class AdvertiserOnboardingController {
 
     private static final String SESSION_COOKIE = "properia_session";
+
+    private static final Logger log = LoggerFactory.getLogger(AdvertiserOnboardingController.class);
 
     private final JdbcClient jdbc;
     private final ObjectMapper objectMapper;
@@ -71,14 +75,14 @@ public class AdvertiserOnboardingController {
         if (body.get("taxNumber") != null) {
             var tax = body.get("taxNumber").toString();
             if (!tax.isBlank() && !isValidPortugueseTaxNumber(tax)) {
-                throw new DomainException("VALIDATION_ERROR",
+                throw new DomainException("INVALID_TAX_NUMBER",
                     "NIF/NIPC inválido. Introduz um número português válido com 9 dígitos.", 422);
             }
         }
         if (body.get("licenseNumber") != null) {
             var license = body.get("licenseNumber").toString();
             if (!license.isBlank() && requiresAmiRegistration(advertiserTypeSelected) && !isValidAmiLicenseNumber(license)) {
-                throw new DomainException("VALIDATION_ERROR",
+                throw new DomainException("INVALID_AMI_LICENSE",
                     "Número AMI inválido. Usa o formato AMI 6600 ou 6600.", 422);
             }
         }
@@ -89,14 +93,14 @@ public class AdvertiserOnboardingController {
             var effectiveTax = body.containsKey("taxNumber")
                 ? stringOrNull(body.get("taxNumber")) : (String) adv.get("taxNumber");
             if (!isValidPortugueseTaxNumber(effectiveTax != null ? effectiveTax : "")) {
-                throw new DomainException("VALIDATION_ERROR",
+                throw new DomainException("INVALID_TAX_NUMBER",
                     "É necessário um NIF/NIPC válido para concluir esta etapa.", 422);
             }
             if (requiresAmiRegistration(advertiserTypeSelected)) {
                 var effectiveLicense = body.containsKey("licenseNumber")
                     ? stringOrNull(body.get("licenseNumber")) : (String) adv.get("licenseNumber");
                 if (!isValidAmiLicenseNumber(effectiveLicense != null ? effectiveLicense : "")) {
-                    throw new DomainException("VALIDATION_ERROR",
+                    throw new DomainException("INVALID_AMI_LICENSE",
                         "É necessário um número AMI válido para concluir esta etapa (obrigatório por lei para mediação imobiliária).", 422);
                 }
             }
@@ -263,9 +267,11 @@ public class AdvertiserOnboardingController {
 
         // Agencies get a 40-day Business trial; all others get 3 welcome credits
         if ("agency".equals(advertiserType)) {
-            try { billingService.activateTrial(id); } catch (Exception ignored) {}
+            try { billingService.activateTrial(id); }
+            catch (Exception e) { log.warn("Onboarding: falha ao ativar trial para advertiser {}: {}", id, e.getMessage()); }
         } else {
-            try { billingService.grantWelcomeCredits(id, 3); } catch (Exception ignored) {}
+            try { billingService.grantWelcomeCredits(id, 3); }
+            catch (Exception e) { log.warn("Onboarding: falha ao conceder créditos de boas-vindas para advertiser {}: {}", id, e.getMessage()); }
         }
 
         var result = loadOnboarding(claims.userId());
@@ -288,7 +294,9 @@ public class AdvertiserOnboardingController {
                     + (jwtProps.getCookieDomain() != null && !jwtProps.getCookieDomain().isBlank()
                         ? "; Domain=" + jwtProps.getCookieDomain() : "")
             );
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.warn("Onboarding: falha ao renovar cookie de sessão após criar advertiser {}: {}", id, e.getMessage());
+        }
 
         return ResponseEntity.status(201).body(Map.of("data", result));
     }
