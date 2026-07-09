@@ -212,6 +212,13 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Geração/carimbo de PDF para assinatura digital (Apache 2.0, self-hosted, grátis) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.31</version>
+        </dependency>
+
     </dependencies>
 
     <build>

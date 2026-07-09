@@ -103,6 +103,21 @@ public class AuthEmailService {
         );
     }
 
+    public void sendSignatureRequest(String to, String signerName, String docTitle, String otp, String token) {
+        String url = appUrl + "/assinar/" + token;
+        String greeting = (signerName != null && !signerName.isBlank()) ? "Olá " + signerName + "," : "Olá,";
+        send(to,
+            "Documento para assinar: " + docTitle,
+            html("Documento para assinar",
+                greeting + "<br><br>Foi-lhe enviado o documento <strong>" + docTitle + "</strong> para assinatura eletrónica.<br><br>" +
+                "Ao abrir o link, vai precisar deste código de verificação:<br><br>" +
+                "<span style=\"font-size:32px;font-weight:700;letter-spacing:8px;color:#1a1a1a\">" + otp + "</span><br><br>" +
+                "O código expira em 15 minutos.",
+                "Rever e assinar", url),
+            greeting + "\nDocumento para assinar: " + docTitle + "\nCódigo de verificação: " + otp + " (válido 15 minutos)\nAssine aqui: " + url
+        );
+    }
+
     private void send(String to, String subject, String htmlBody, String textBody) {
         if (!enabled) {
             log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);

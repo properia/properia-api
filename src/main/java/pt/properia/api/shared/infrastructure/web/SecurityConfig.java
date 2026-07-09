@@ -66,6 +66,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/listings/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/listings/*/view").permitAll()
                 .requestMatchers(HttpMethod.GET, "/public/**").permitAll()
+                // Cerimónia pública de assinatura de documentos (o cliente assina sem conta).
+                // Sob /api/public para passar pelo proxy /api/* do frontend.
+                .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/public/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/search/**").permitAll()
 
                 // Dev local storage media serving (public so listing images render on public pages)

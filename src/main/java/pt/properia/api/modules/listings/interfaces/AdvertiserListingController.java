@@ -23,6 +23,7 @@ public class AdvertiserListingController {
     private final PublishListingUseCase publishListingUseCase;
     private final ArchiveListingUseCase archiveListingUseCase;
     private final PatchListingService patchListingService;
+    private final ListingDescriptionService descriptionService;
 
     public AdvertiserListingController(
             GetAdvertiserListingsUseCase getListingsUseCase,
@@ -30,13 +31,15 @@ public class AdvertiserListingController {
             UpdateListingUseCase updateListingUseCase,
             PublishListingUseCase publishListingUseCase,
             ArchiveListingUseCase archiveListingUseCase,
-            PatchListingService patchListingService) {
+            PatchListingService patchListingService,
+            ListingDescriptionService descriptionService) {
         this.getListingsUseCase = getListingsUseCase;
         this.createListingUseCase = createListingUseCase;
         this.updateListingUseCase = updateListingUseCase;
         this.publishListingUseCase = publishListingUseCase;
         this.archiveListingUseCase = archiveListingUseCase;
         this.patchListingService = patchListingService;
+        this.descriptionService = descriptionService;
     }
 
     @GetMapping
@@ -150,6 +153,20 @@ public class AdvertiserListingController {
         var advertiserId = resolveAdvertiserId(claims);
         archiveListingUseCase.execute(new ArchiveListingUseCase.Command(id, advertiserId));
         return ResponseEntity.ok(Map.of("data", Map.of("archived", true)));
+    }
+
+    /**
+     * Gera uma descrição de anúncio por IA a partir dos factos do formulário (+ sinais
+     * de Vision quando enviados). Ação EXPLÍCITA do utilizador — o texto é devolvido para
+     * edição, nunca escrito em silêncio. Ver ListingDescriptionService.
+     */
+    @PostMapping("/generate-description")
+    public ResponseEntity<?> generateDescription(
+            @RequestBody(required = false) Map<String, Object> facts,
+            @AuthenticationPrincipal JwtClaims claims) {
+        resolveAdvertiserId(claims); // exige anunciante autenticado
+        var description = descriptionService.generate(facts == null ? Map.of() : facts);
+        return ResponseEntity.ok(Map.of("data", Map.of("description", description)));
     }
 
     private UUID resolveAdvertiserId(JwtClaims claims) {
