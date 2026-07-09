@@ -394,10 +394,16 @@ public class AdvertiserMetricsService {
             .param("adv", advertiserId).param("since", ts30dAgo)
             .query((rs, n) -> Map.entry(rs.getString("status"), (int) rs.getLong("cnt")))
             .list();
+        // "Adesão" = confirmadas ÷ TODAS as visitas pedidas. Antes o denominador contava
+        // só status='requested' (pendentes), excluindo as que já tinham avançado para
+        // 'confirmed'/'completed' → dava rácios absurdos (ex.: 5 confirmadas / 0 pedidas).
+        // Denominador = universo de visitas pedidas (qualquer estado); numerador = as que
+        // chegaram a confirmar (confirmed + completed).
         var visitsRequested = visitStats.stream()
-            .filter(e -> "requested".equals(e.getKey())).mapToInt(Map.Entry::getValue).sum();
+            .mapToInt(Map.Entry::getValue).sum();
         var visitsConfirmed = visitStats.stream()
-            .filter(e -> "confirmed".equals(e.getKey())).mapToInt(Map.Entry::getValue).sum();
+            .filter(e -> "confirmed".equals(e.getKey()) || "completed".equals(e.getKey()))
+            .mapToInt(Map.Entry::getValue).sum();
 
         // At-risk leads (stalled > 48h in non-proposal, > 72h in proposal)
         var atRiskRows = jdbc.sql("""
@@ -434,9 +440,17 @@ public class AdvertiserMetricsService {
 
         int atRiskCount = atRiskRows.size();
 
+        // Total de leads (histórico) — para distinguir uma conta SEM atividade de uma
+        // com problemas. Sem isto, uma conta nova (0 leads) caía em "attention" por causa
+        // do ramo `atRiskCount <= 2` (0 <= 2 = true) → mostrava "Pede seguimento" sem nada
+        // para seguir. Sem atividade = estado calmo, não um alerta.
+        int totalLeads = funnelMap.values().stream().mapToInt(v -> (Integer) v).sum();
+
         // Health score
         String healthScore;
-        if (atRiskCount == 0 && responseRate >= 0.6) {
+        if (totalLeads == 0) {
+            healthScore = "good";
+        } else if (atRiskCount == 0 && responseRate >= 0.6) {
             healthScore = "good";
         } else if (atRiskCount <= 2 || responseRate >= 0.3) {
             healthScore = "attention";
@@ -452,7 +466,10 @@ public class AdvertiserMetricsService {
 
         // Insight (static based on health)
         var insight = new LinkedHashMap<String, Object>();
-        if ("good".equals(healthScore)) {
+        if (totalLeads == 0) {
+            insight.put("headline", "Ainda sem atividade comercial");
+            insight.put("detail", "Publica imóveis e partilha os anúncios para começares a receber contactos. O teu radar ganha vida assim que entrarem os primeiros leads.");
+        } else if ("good".equals(healthScore)) {
             insight.put("headline", "Operação em boa forma esta semana");
             insight.put("detail", "A carteira está equilibrada. Mantém o ritmo de resposta para preservar a taxa de conversão.");
         } else if ("attention".equals(healthScore)) {
@@ -463,6 +480,29 @@ public class AdvertiserMetricsService {
             insight.put("detail", "A taxa de resposta está baixa e há leads sem seguimento. Actua hoje para recuperar o ritmo comercial.");
         }
 
+        // Tempo médio (min) até à 1ª resposta do anunciante nos últimos 30 dias.
+        // Mesma definição do KPI da página de leads. AVG de conjunto vazio = NULL em SQL
+        // → devolve null (nunca 0/0 = NaN, que era o que produzia o "NaNh" no frontend).
+        Integer avgResponseMinutes = jdbc.sql("""
+                SELECT ROUND(AVG(EXTRACT(EPOCH FROM (fr.first_response - l.created_at)) / 60.0))::int
+                FROM properia.leads l
+                JOIN (
+                    SELECT lead_id, MIN(created_at) AS first_response
+                    FROM (
+                        SELECT lead_id, created_at FROM properia.lead_responses WHERE advertiser_id = :adv
+                        UNION ALL
+                        SELECT lead_id, created_at FROM properia.chat_messages
+                         WHERE advertiser_id = :adv AND sender_type::text = 'advertiser_member' AND lead_id IS NOT NULL
+                    ) r
+                    GROUP BY lead_id
+                ) fr ON fr.lead_id = l.id
+                WHERE l.advertiser_id = :adv
+                  AND l.created_at > :since
+                  AND fr.first_response >= l.created_at
+                """)
+            .param("adv", advertiserId).param("since", ts30dAgo)
+            .query(Integer.class).optional().orElse(null);
+
         var result = new LinkedHashMap<String, Object>();
         result.put("weekLabel", weekLabel);
         result.put("healthScore", healthScore);
@@ -470,7 +510,7 @@ public class AdvertiserMetricsService {
         result.put("responseRate", Math.round(responseRate * 100.0) / 100.0);
         result.put("visitsConfirmed", visitsConfirmed);
         result.put("visitsRequested", visitsRequested);
-        result.put("avgResponseMinutes", null);
+        result.put("avgResponseMinutes", avgResponseMinutes);
         result.put("atRiskCount", atRiskCount);
         result.put("funnel", funnelMap);
         result.put("forecast", forecast);
