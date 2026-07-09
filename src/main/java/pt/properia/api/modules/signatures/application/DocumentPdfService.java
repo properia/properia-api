@@ -48,11 +48,24 @@ public class DocumentPdfService {
                 text(cs, PDType1Font.HELVETICA_BOLD, 18, MARGIN, top, "FICHA DE VISITA");
                 String agency = str(payload, "agencyName");
                 if (!agency.isBlank()) {
-                    text(cs, PDType1Font.HELVETICA, 10, MARGIN, top - 18, agency);
+                    text(cs, PDType1Font.HELVETICA_BOLD, 10, MARGIN, top - 18, agency);
                 }
-                hr(cs, top - 30);
+                // Identificação legal da agência de mediação (Lei 15/2013): nome legal, NIF, AMI.
+                var idParts = new java.util.ArrayList<String>();
+                String legal = str(payload, "agencyLegalName");
+                String nif = str(payload, "agencyTaxNumber");
+                String ami = str(payload, "amiLicense");
+                if (!legal.isBlank() && !legal.equals(agency)) idParts.add(legal);
+                if (!nif.isBlank()) idParts.add("NIF " + nif);
+                if (!ami.isBlank()) idParts.add("Lic. AMI " + ami);
+                float headerBottom = top - 30;
+                if (!idParts.isEmpty()) {
+                    text(cs, PDType1Font.HELVETICA, 8, MARGIN, top - 30, String.join("  ·  ", idParts));
+                    headerBottom = top - 42;
+                }
+                hr(cs, headerBottom);
 
-                y = top - 56;
+                y = headerBottom - 26;
                 y = field(cs, y, "Imóvel", str(payload, "listingTitle"));
                 y = field(cs, y, "Morada", str(payload, "address"));
                 y = field(cs, y, "Data da visita", str(payload, "visitDate"));

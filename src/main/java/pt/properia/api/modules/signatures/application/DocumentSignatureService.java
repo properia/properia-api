@@ -54,7 +54,7 @@ public class DocumentSignatureService {
 
     public record PublicView(
         String title, String signerName, String signerEmail, String status,
-        String documentType, boolean signed) {}
+        String documentType, boolean signed, String agencyName) {}
 
     public record SignResult(String documentHash, Instant signedAt) {}
 
@@ -71,7 +71,9 @@ public class DocumentSignatureService {
             || req.signerEmail() == null || req.signerEmail().isBlank()) {
             throw new DomainException("VALIDATION_ERROR", "Nome e email do cliente são obrigatórios.", 422);
         }
-        var payload = req.payload() == null ? new LinkedHashMap<String, Object>() : req.payload();
+        var payload = new LinkedHashMap<String, Object>();
+        if (req.payload() != null) payload.putAll(req.payload());
+        enrichWithAgency(advertiserId, payload);
         byte[] unsigned = pdfService.buildVisitForm(payload, null);
         String token = randomToken();
 
@@ -150,14 +152,15 @@ public class DocumentSignatureService {
     @Transactional
     public PublicView getPublicView(String token) {
         var view = jdbc.sql("""
-                SELECT title, signer_name, signer_email, status, document_type, expires_at
+                SELECT title, signer_name, signer_email, status, document_type,
+                       payload->>'agencyName' AS agency_name
                 FROM properia.document_signatures WHERE sign_token = :token
                 """)
             .param("token", token)
             .query((rs, n) -> new PublicView(
                 rs.getString("title"), rs.getString("signer_name"), rs.getString("signer_email"),
                 rs.getString("status"), rs.getString("document_type"),
-                "signed".equals(rs.getString("status"))))
+                "signed".equals(rs.getString("status")), rs.getString("agency_name")))
             .optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Documento não encontrado ou link inválido.", 404));
 
@@ -255,6 +258,7 @@ public class DocumentSignatureService {
                 SET signed_pdf = :signed, document_hash = :hash, status = 'signed',
                     signed_at = now(), signer_ip = :ip, signer_user_agent = :ua,
                     otp_code_hash = NULL,
+                    retention_until = now() + interval '5 years',
                     audit = audit || CAST(:event AS jsonb), updated_at = now()
                 WHERE sign_token = :token
                 """)
@@ -321,6 +325,25 @@ public class DocumentSignatureService {
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────────
+
+    /** Injeta identificação da agência + nº AMI (Lei 15/2013) no documento. */
+    private void enrichWithAgency(UUID advertiserId, Map<String, Object> payload) {
+        jdbc.sql("""
+                SELECT legal_name, brand_name, license_number, tax_number
+                FROM properia.advertisers WHERE id = :adv
+                """)
+            .param("adv", advertiserId)
+            .query((rs, n) -> {
+                var legal = rs.getString("legal_name");
+                var brand = rs.getString("brand_name");
+                payload.putIfAbsent("agencyName", (brand != null && !brand.isBlank()) ? brand : legal);
+                if (legal != null) payload.put("agencyLegalName", legal);
+                if (rs.getString("license_number") != null) payload.put("amiLicense", rs.getString("license_number"));
+                if (rs.getString("tax_number") != null) payload.put("agencyTaxNumber", rs.getString("tax_number"));
+                return true;
+            })
+            .optional();
+    }
 
     private Map<String, Object> auditEvent(String type, String ip) {
         var m = new LinkedHashMap<String, Object>();
