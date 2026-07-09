@@ -351,6 +351,70 @@ public class JdbcSearchRepository implements SearchRepository {
             params.put("commercialPermittedUse", p.commercialPermittedUse().toArray(String[]::new));
         }
 
+        // ── Filtros avançados (formulário de criar imóvel) ──────────────────────
+        var adv = p.advanced();
+        if (adv != null) {
+            // Infraestruturas
+            if (adv.fibraOtica()) parts.add("l.fibra_otica = true");
+            if (adv.gasCanalizado()) parts.add("l.gas_canalizado = true");
+            if (adv.tvCabo()) parts.add("l.tv_cabo = true");
+            if (adv.fossaSeptica()) parts.add("l.fossa_septica = true");
+            if (adv.seguroCondominioIncluido()) parts.add("l.seguro_condominio_incluido = true");
+            // Sistemas & eficiência
+            if (adv.heatingTypes() != null && !adv.heatingTypes().isEmpty()) {
+                parts.add("l.heating_type = ANY(:heatingTypes)");
+                params.put("heatingTypes", adv.heatingTypes().toArray(String[]::new));
+            }
+            if (adv.hasAirConditioning()) parts.add("l.cooling_type IS NOT NULL AND l.cooling_type NOT IN ('', 'none')");
+            if (adv.waterHeatingTypes() != null && !adv.waterHeatingTypes().isEmpty()) {
+                parts.add("l.water_heating_type = ANY(:waterHeatingTypes)");
+                params.put("waterHeatingTypes", adv.waterHeatingTypes().toArray(String[]::new));
+            }
+            if (adv.vidrosDuplos()) parts.add("l.tipo_caixilharia IN ('pvc_duplo', 'aluminio_termico')");
+            if (adv.buildingPositions() != null && !adv.buildingPositions().isEmpty()) {
+                parts.add("l.localizacao_edificio = ANY(:buildingPositions)");
+                params.put("buildingPositions", adv.buildingPositions().toArray(String[]::new));
+            }
+            // Divisões
+            if (adv.suitesMin() != null) {
+                parts.add("l.suites >= :suitesMin");
+                params.put("suitesMin", adv.suitesMin());
+            }
+            if (adv.hasWcServico()) parts.add("l.wc_servico >= 1");
+            // Custos
+            if (adv.condoFeeMax() != null) {
+                parts.add("l.condo_fee <= :condoFeeMax");
+                params.put("condoFeeMax", adv.condoFeeMax());
+            }
+            if (adv.propertyTaxMax() != null) {
+                parts.add("l.property_tax_annual <= :propertyTaxMax");
+                params.put("propertyTaxMax", adv.propertyTaxMax());
+            }
+            if (adv.depositMax() != null) {
+                parts.add("l.deposit_required <= :depositMax");
+                params.put("depositMax", adv.depositMax());
+            }
+            // Construção
+            if (adv.constructionYearMin() != null) {
+                parts.add("l.construction_year >= :constructionYearMin");
+                params.put("constructionYearMin", adv.constructionYearMin());
+            }
+            // Comercial (sub-tabela)
+            if (adv.commercialHasWc()) parts.add("EXISTS (SELECT 1 FROM properia.listing_commercial_details cd WHERE cd.listing_id = l.id AND cd.has_wc = true)");
+            if (adv.commercialHasKitchenette()) parts.add("EXISTS (SELECT 1 FROM properia.listing_commercial_details cd WHERE cd.listing_id = l.id AND cd.has_kitchenette = true)");
+            if (adv.commercialHasOutdoorSeating()) parts.add("EXISTS (SELECT 1 FROM properia.listing_commercial_details cd WHERE cd.listing_id = l.id AND cd.has_outdoor_seating_potential = true)");
+            if (adv.commercialInternalFloorsMin() != null) {
+                parts.add("EXISTS (SELECT 1 FROM properia.listing_commercial_details cd WHERE cd.listing_id = l.id AND cd.internal_floors >= :commercialInternalFloorsMin)");
+                params.put("commercialInternalFloorsMin", adv.commercialInternalFloorsMin());
+            }
+            // Rural / terreno
+            if (adv.waterSources() != null && !adv.waterSources().isEmpty()) {
+                parts.add("l.water_source = ANY(:waterSources)");
+                params.put("waterSources", adv.waterSources().toArray(String[]::new));
+            }
+            if (adv.agriculturalUse()) parts.add("l.agricultural_use = true");
+        }
+
         // Advertiser filter (agency profile page)
         if (p.advertiserId() != null && !p.advertiserId().isBlank()) {
             parts.add("l.advertiser_id = :advertiserId::uuid");

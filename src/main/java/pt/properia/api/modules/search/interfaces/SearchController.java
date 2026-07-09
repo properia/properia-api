@@ -1,8 +1,10 @@
 package pt.properia.api.modules.search.interfaces;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.search.application.SearchListingsUseCase;
+import pt.properia.api.modules.search.application.dto.AdvancedSearchFilters;
 import pt.properia.api.modules.search.application.dto.SearchParams;
 
 import java.util.List;
@@ -58,7 +60,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasFluePipe,
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
-            @RequestParam(required = false) String advertiserId) {
+            @RequestParam(required = false) String advertiserId,
+            HttpServletRequest request) {
 
         int safePage = Math.max(1, page);
         int safePageSize = Math.min(48, Math.max(1, pageSize));
@@ -79,7 +82,8 @@ public class SearchController {
             commercialHasShopfront, splitCsv(commercialStreetVisibility),
             commercialHasVehicleAccess, commercialHasFluePipe,
             commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
-            advertiserId
+            advertiserId,
+            buildAdvanced(request)
         );
 
         var result = useCase.search(params);
@@ -119,7 +123,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasFluePipe,
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
-            @RequestParam(required = false) String advertiserId) {
+            @RequestParam(required = false) String advertiserId,
+            HttpServletRequest request) {
 
         var params = new SearchParams(
             q, negocio,
@@ -137,7 +142,8 @@ public class SearchController {
             commercialHasShopfront, splitCsv(commercialStreetVisibility),
             commercialHasVehicleAccess, commercialHasFluePipe,
             commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
-            advertiserId
+            advertiserId,
+            buildAdvanced(request)
         );
 
         long total = useCase.count(params);
@@ -150,6 +156,53 @@ public class SearchController {
             .map(String::trim)
             .filter(s -> !s.isBlank())
             .toList();
+    }
+
+    // Lê os filtros avançados diretamente do request — evita ~44 @RequestParam extra.
+    private AdvancedSearchFilters buildAdvanced(HttpServletRequest r) {
+        return new AdvancedSearchFilters(
+            boolParam(r, "fibraOtica"),
+            boolParam(r, "gasCanalizado"),
+            boolParam(r, "tvCabo"),
+            boolParam(r, "fossaSeptica"),
+            boolParam(r, "seguroCondominioIncluido"),
+            splitCsv(r.getParameter("heatingTypes")),
+            boolParam(r, "hasAirConditioning"),
+            splitCsv(r.getParameter("waterHeatingTypes")),
+            boolParam(r, "vidrosDuplos"),
+            splitCsv(r.getParameter("buildingPositions")),
+            intParam(r, "suitesMin"),
+            boolParam(r, "hasWcServico"),
+            doubleParam(r, "condoFeeMax"),
+            doubleParam(r, "propertyTaxMax"),
+            doubleParam(r, "depositMax"),
+            intParam(r, "constructionYearMin"),
+            boolParam(r, "commercialHasWc"),
+            boolParam(r, "commercialHasKitchenette"),
+            boolParam(r, "commercialHasOutdoorSeating"),
+            intParam(r, "commercialInternalFloorsMin"),
+            splitCsv(r.getParameter("waterSources")),
+            boolParam(r, "agriculturalUse")
+        );
+    }
+
+    private boolean boolParam(HttpServletRequest r, String name) {
+        var v = r.getParameter(name);
+        // Aceita as convenções usadas pelo frontend ("1") e por Spring ("true"/"on"/"yes").
+        return v != null && (v.equalsIgnoreCase("true") || v.equals("1")
+            || v.equalsIgnoreCase("on") || v.equalsIgnoreCase("yes"));
+    }
+
+    private Integer intParam(HttpServletRequest r, String name) {
+        var v = r.getParameter(name);
+        if (v == null || v.isBlank()) return null;
+        try { return Integer.valueOf(v.trim()); } catch (NumberFormatException e) { return null; }
+    }
+
+    private Double doubleParam(HttpServletRequest r, String name) {
+        var v = r.getParameter(name);
+        if (v == null || v.isBlank()) return null;
+        try { return Double.valueOf(v.trim()); } catch (NumberFormatException e) { return null; }
     }
 
     private List<Integer> splitInts(String value) {

@@ -44,7 +44,8 @@ public record SearchParams(
     boolean commercialHasFluePipe,
     boolean commercialHasExtractionSystem,
     List<String> commercialPermittedUse,
-    String advertiserId
+    String advertiserId,
+    AdvancedSearchFilters advanced
 ) {
     public static SearchParams defaults() {
         return new SearchParams(
@@ -55,7 +56,8 @@ public record SearchParams(
             null, null, null, null,
             false, false, false, false, false, null,
             false, List.of(), false, false, false, List.of(),
-            null
+            null,
+            AdvancedSearchFilters.empty()
         );
     }
 }
