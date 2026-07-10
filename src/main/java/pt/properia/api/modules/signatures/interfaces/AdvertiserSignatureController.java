@@ -41,6 +41,23 @@ public class AdvertiserSignatureController {
         return ResponseEntity.ok(Map.of("data", dto));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<?> detail(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = resolveAdvertiserId(claims);
+        return ResponseEntity.ok(Map.of("data", service.getDetail(advertiserId, id)));
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<?> cancel(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = resolveAdvertiserId(claims);
+        service.cancel(advertiserId, id);
+        return ResponseEntity.ok(Map.of("data", Map.of("cancelled", true)));
+    }
+
     @PostMapping("/{id}/send")
     public ResponseEntity<?> send(
             @PathVariable UUID id,

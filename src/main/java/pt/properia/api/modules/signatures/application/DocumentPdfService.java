@@ -70,6 +70,10 @@ public class DocumentPdfService {
                 y = field(cs, y, "Morada", str(payload, "address"));
                 y = field(cs, y, "Data da visita", str(payload, "visitDate"));
                 y = field(cs, y, "Cliente", str(payload, "clientName"));
+                String clientNif = str(payload, "clientNif");
+                if (!clientNif.isBlank()) {
+                    y = field(cs, y, "NIF do cliente", clientNif);
+                }
                 y = field(cs, y, "Contacto do cliente", str(payload, "clientContact"));
                 y = field(cs, y, "Agente", str(payload, "agentName"));
 

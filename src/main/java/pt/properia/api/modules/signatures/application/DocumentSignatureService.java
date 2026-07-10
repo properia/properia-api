@@ -60,6 +60,9 @@ public class DocumentSignatureService {
 
     public record VerifyResult(boolean valid, String title, String signerName, Instant signedAt) {}
 
+    /** Detalhe para o agente: DTO + link de assinatura + timeline de auditoria. */
+    public record SignatureDetail(SignatureDto item, String signToken, List<Map<String, Object>> auditTrail) {}
+
     // ── Criar ────────────────────────────────────────────────────────────────────
 
     @Transactional
@@ -125,6 +128,9 @@ public class DocumentSignatureService {
         if ("signed".equals(row.get("status"))) {
             throw new DomainException("ALREADY_SIGNED", "Este documento já foi assinado.", 409);
         }
+        if ("cancelled".equals(row.get("status"))) {
+            throw new DomainException("CANCELLED", "Este documento foi anulado — cria um novo.", 409);
+        }
 
         String otp = generateOtp();
         jdbc.sql("""
@@ -152,8 +158,11 @@ public class DocumentSignatureService {
     @Transactional
     public PublicView getPublicView(String token) {
         var view = jdbc.sql("""
-                SELECT title, signer_name, signer_email, status, document_type,
-                       payload->>'agencyName' AS agency_name
+                SELECT title, signer_name, signer_email, document_type,
+                       payload->>'agencyName' AS agency_name,
+                       -- Expiração aplicada na leitura: link vencido aparece como 'expired'.
+                       CASE WHEN status NOT IN ('signed','cancelled') AND expires_at < now()
+                            THEN 'expired' ELSE status END AS status
                 FROM properia.document_signatures WHERE sign_token = :token
                 """)
             .param("token", token)
@@ -228,6 +237,9 @@ public class DocumentSignatureService {
         if ("signed".equals(status)) {
             throw new DomainException("ALREADY_SIGNED", "Este documento já foi assinado.", 409);
         }
+        if ("cancelled".equals(status)) {
+            throw new DomainException("CANCELLED", "Este documento foi anulado pela agência.", 410);
+        }
         if (row.get("otpHash") == null) {
             throw new DomainException("NOT_SENT", "O documento ainda não foi enviado para assinatura.", 409);
         }
@@ -287,6 +299,41 @@ public class DocumentSignatureService {
             .param("adv", advertiserId)
             .query((rs, n) -> mapDto(rs))
             .list();
+    }
+
+    /** Detalhe do documento para o agente: timeline de auditoria + token do link de assinatura. */
+    public SignatureDetail getDetail(UUID advertiserId, UUID id) {
+        return jdbc.sql("""
+                SELECT id, document_type, title, status, signer_name, signer_email,
+                       document_hash, created_at, signed_at, sign_token, audit::text AS audit_json
+                FROM properia.document_signatures
+                WHERE id = :id AND advertiser_id = :adv
+                """)
+            .param("id", id).param("adv", advertiserId)
+            .query((rs, n) -> new SignatureDetail(
+                mapDto(rs),
+                rs.getString("sign_token"),
+                readJsonList(rs.getString("audit_json"))))
+            .optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Documento não encontrado.", 404));
+    }
+
+    /** Anula um documento por assinar (o link deixa de funcionar). Assinados são imutáveis. */
+    @Transactional
+    public void cancel(UUID advertiserId, UUID id) {
+        int updated = jdbc.sql("""
+                UPDATE properia.document_signatures
+                SET status = 'cancelled', otp_code_hash = NULL,
+                    audit = audit || CAST(:event AS jsonb), updated_at = now()
+                WHERE id = :id AND advertiser_id = :adv AND status <> 'signed'
+                """)
+            .param("event", writeJson(auditEvent("cancelled", null)))
+            .param("id", id).param("adv", advertiserId)
+            .update();
+        if (updated == 0) {
+            throw new DomainException("CANNOT_CANCEL",
+                "Documento não encontrado ou já assinado (documentos assinados são imutáveis).", 409);
+        }
     }
 
     public VerifyResult verifyByHash(String hash) {
@@ -391,6 +438,15 @@ public class DocumentSignatureService {
             return json.writeValueAsString(o);
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> readJsonList(String s) {
+        try {
+            return s == null || s.isBlank() ? List.of() : json.readValue(s, List.class);
+        } catch (Exception e) {
+            return List.of();
         }
     }
 
