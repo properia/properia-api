@@ -86,4 +86,68 @@ class DocumentPdfServiceTest {
         byte[] pdf = service.buildVisitForm(Map.of(), null);
         assertTrue(isPdf(pdf), "Mesmo sem dados deve gerar um PDF (com traços nos campos)");
     }
+
+    @Test
+    void generatesCpcvWithMultiplePartiesAndPrices() {
+        var payload = Map.<String, Object>ofEntries(
+            Map.entry("agencyName", "Imobiliária Sol"),
+            Map.entry("amiLicense", "AMI-12345"),
+            Map.entry("agencyTaxNumber", "500123456"),
+            Map.entry("sellerName", "José Silva"),
+            Map.entry("sellerNif", "111222333"),
+            Map.entry("buyerName", "Ana Conceição"),
+            Map.entry("buyerNif", "444555666"),
+            Map.entry("propertyAddress", "Rua das Flores, 10, Lisboa"),
+            Map.entry("totalPrice", "250000"),
+            Map.entry("depositAmount", "25000"),
+            Map.entry("deedDeadline", "90 dias após a assinatura")
+        );
+
+        byte[] pdf = service.buildDocument("cpcv", payload, null);
+
+        assertTrue(isPdf(pdf));
+        assertTrue(pdf.length > 1000, "CPCV é um documento mais rico");
+    }
+
+    @Test
+    void generatesCmiWithAmiLicense() {
+        var payload = Map.<String, Object>of(
+            "agencyName", "Imobiliária Sol", "amiLicense", "AMI-12345",
+            "clientName", "Maria Santos", "clientNif", "123456789",
+            "propertyAddress", "Av. da Liberdade, 5, Lisboa",
+            "mediationRegime", "exclusivo", "salePrice", "300000",
+            "commission", "5% + IVA", "durationMonths", "6"
+        );
+
+        byte[] pdf = service.buildDocument("cmi", payload, null);
+
+        assertTrue(isPdf(pdf));
+        assertTrue(pdf.length > 1000);
+    }
+
+    @Test
+    void appendsSignaturePageToUploadedPdf() throws Exception {
+        // Simula um "PDF carregado pela agência" gerando um base e anexando assinaturas.
+        byte[] base = service.buildDocument("visit_form", Map.of("listingTitle", "T2"), null);
+        var stamp = new DocumentPdfService.SignatureStamp(
+            "Ana Conceição", Instant.now(), "203.0.113.7", "UA", tinyPng(), "doc-1");
+        var slots = java.util.List.of(new DocumentPdfService.SignatureSlot("Promitente-comprador", stamp));
+
+        byte[] out = service.appendSignatures(base, Map.of("agencyName", "Imobiliária Sol"), slots);
+
+        assertTrue(isPdf(out), "Deve continuar a ser um PDF válido");
+        assertTrue(out.length > base.length, "Anexar assinaturas deve aumentar o documento");
+    }
+
+    @Test
+    void longContentPaginatesWithoutError() {
+        var longText = "Cláusula ".repeat(400); // força múltiplas páginas
+        var payload = Map.<String, Object>of(
+            "propertyAddress", "Rua X", "specialConditions", longText, "totalPrice", "100000");
+
+        assertDoesNotThrow(() -> {
+            byte[] pdf = service.buildDocument("cpcv", payload, null);
+            assertTrue(isPdf(pdf));
+        });
+    }
 }
