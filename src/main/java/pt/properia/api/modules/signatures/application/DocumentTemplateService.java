@@ -48,7 +48,11 @@ public class DocumentTemplateService {
         var fields = pdfService.detectFormFields(pdf);
         if (fields.isEmpty()) {
             throw new DomainException("NO_FORM_FIELDS",
-                "Este PDF não tem campos prenchíveis. Torna-o num formulário (campos AcroForm) e volta a carregar.", 422);
+                "Este PDF não tem campos prenchíveis (campos de formulário/AcroForm) — por isso não conseguimos "
+                + "detetar onde inserir os dados. No Word/LibreOffice, insere \"Controlos de conteúdo\" ou "
+                + "\"Campos de formulário\" nos espaços a preencher (nome, NIF, preço…) e depois exporta/imprime "
+                + "para PDF. No Adobe Acrobat: Ferramentas → Preparar Formulário deteta os campos automaticamente.",
+                422);
         }
         var id = jdbc.sql("""
                 INSERT INTO properia.document_templates (advertiser_id, name, document_type, pdf_template, fields)
