@@ -6,6 +6,11 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDChoice;
+import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTerminalField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -91,6 +96,70 @@ public class DocumentPdfService {
         } catch (Exception e) {
             throw new RuntimeException("Falha a anexar assinaturas ao PDF carregado: " + e.getMessage(), e);
         }
+    }
+
+    // ── Modelos AcroForm (PDF prenchível carregado pela agência) ─────────────────
+
+    public record FormFieldInfo(String name, String type) {}
+
+    /** Deteta os campos de formulário (AcroForm) de um PDF carregado. */
+    public List<FormFieldInfo> detectFormFields(byte[] pdf) {
+        try (var doc = org.apache.pdfbox.pdmodel.PDDocument.load(pdf)) {
+            var form = doc.getDocumentCatalog().getAcroForm();
+            if (form == null) return List.of();
+            var out = new ArrayList<FormFieldInfo>();
+            for (var field : form.getFieldTree()) {
+                if (field instanceof PDTerminalField && field.getFullyQualifiedName() != null) {
+                    out.add(new FormFieldInfo(field.getFullyQualifiedName(), fieldType(field)));
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            throw new RuntimeException("Não foi possível ler os campos do PDF: " + e.getMessage(), e);
+        }
+    }
+
+    private String fieldType(Object field) {
+        if (field instanceof PDCheckBox) return "checkbox";
+        if (field instanceof PDRadioButton) return "radio";
+        if (field instanceof PDChoice) return "choice";
+        return "text";
+    }
+
+    /** Preenche os campos do modelo com os valores e "achata" (torna não-editável). */
+    public byte[] fillAndFlatten(byte[] pdf, Map<String, String> values) {
+        try (var doc = org.apache.pdfbox.pdmodel.PDDocument.load(pdf)) {
+            var form = doc.getDocumentCatalog().getAcroForm();
+            if (form != null) {
+                for (var field : form.getFieldTree()) {
+                    if (!(field instanceof PDTerminalField)) continue;
+                    var name = field.getFullyQualifiedName();
+                    if (name == null || !values.containsKey(name)) continue;
+                    var val = values.get(name);
+                    try {
+                        if (field instanceof PDCheckBox cb) {
+                            if (isTruthy(val)) cb.check(); else cb.unCheck();
+                        } else if (field instanceof PDTextField || field instanceof PDChoice) {
+                            field.setValue(val == null ? "" : val);
+                        }
+                    } catch (Exception ignored) {
+                        // Valor incompatível com o campo (ex.: opção inexistente) — ignora.
+                    }
+                }
+                form.flatten();
+            }
+            var baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Não foi possível preencher o modelo: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean isTruthy(String v) {
+        if (v == null) return false;
+        var s = v.trim().toLowerCase();
+        return s.equals("true") || s.equals("1") || s.equals("sim") || s.equals("on") || s.equals("yes") || s.equals("x");
     }
 
     private String titleFor(String type) {

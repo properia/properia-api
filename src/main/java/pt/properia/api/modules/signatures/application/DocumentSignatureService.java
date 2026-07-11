@@ -52,7 +52,7 @@ public class DocumentSignatureService {
     public record CreateRequest(
         String documentType, String title, String signerName, String signerEmail,
         UUID leadId, UUID visitId, Map<String, Object> payload, List<SignerInput> signers,
-        String uploadedPdf) {}
+        String uploadedPdf, UUID templateId, Map<String, Object> fieldValues) {}
 
     public record SignatureDto(
         String id, String documentType, String title, String status,
@@ -92,9 +92,24 @@ public class DocumentSignatureService {
         enrichWithAgency(advertiserId, payload);
         var type = req.documentType() == null || req.documentType().isBlank() ? "visit_form" : req.documentType();
 
-        // PDF não assinado: gerado por template OU o PDF carregado pela agência (tipo 'upload').
+        // PDF não assinado, por origem:
+        //  - modelo da agência (AcroForm) preenchido com os dados do formulário;
+        //  - PDF já preenchido carregado (upload);
+        //  - gerado por template interno (ficha de visita).
         byte[] unsigned;
-        if ("upload".equals(type)) {
+        if (req.templateId() != null) {
+            type = "template";
+            byte[] tpl = jdbc.sql("SELECT pdf_template FROM properia.document_templates WHERE id = :id AND advertiser_id = :adv")
+                .param("id", req.templateId()).param("adv", advertiserId)
+                .query((rs, n) -> rs.getBytes("pdf_template"))
+                .optional()
+                .orElseThrow(() -> new DomainException("NOT_FOUND", "Modelo não encontrado.", 404));
+            var values = new LinkedHashMap<String, String>();
+            if (req.fieldValues() != null) {
+                req.fieldValues().forEach((k, v) -> values.put(k, v == null ? "" : v.toString()));
+            }
+            unsigned = pdfService.fillAndFlatten(tpl, values);
+        } else if ("upload".equals(type)) {
             unsigned = decodePdf(req.uploadedPdf());
         } else {
             var slots = signers.stream().map(s -> new SignatureSlot(s.roleLabel(), null)).toList();
@@ -389,9 +404,12 @@ public class DocumentSignatureService {
             Map<String, Object> payload = readJsonMap(loadPayload(docId));
             var slots = loadSignerSlots(docId);
             var docType = (String) row.get("documentType");
-            byte[] finalPdf = "upload".equals(docType)
-                ? pdfService.appendSignatures(loadUnsignedPdf(docId), payload, slots)
-                : pdfService.buildMultiDocument(docType, payload, slots);
+            // Só a ficha de visita é gerada por nós; modelos/uploads mantêm o PDF base
+            // intacto e recebem uma página de assinaturas anexada.
+            boolean generated = "visit_form".equals(docType) || "cpcv".equals(docType) || "cmi".equals(docType);
+            byte[] finalPdf = generated
+                ? pdfService.buildMultiDocument(docType, payload, slots)
+                : pdfService.appendSignatures(loadUnsignedPdf(docId), payload, slots);
             String hash = sha256Hex(finalPdf);
             jdbc.sql("""
                     UPDATE properia.document_signatures

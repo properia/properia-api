@@ -139,6 +139,49 @@ class DocumentPdfServiceTest {
         assertTrue(out.length > base.length, "Anexar assinaturas deve aumentar o documento");
     }
 
+    private static byte[] fillablePdf() throws Exception {
+        try (var doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage(org.apache.pdfbox.pdmodel.common.PDRectangle.A4);
+            doc.addPage(page);
+            var form = new org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm(doc);
+            doc.getDocumentCatalog().setAcroForm(form);
+            var res = new org.apache.pdfbox.pdmodel.PDResources();
+            res.put(org.apache.pdfbox.cos.COSName.getPDFName("Helv"),
+                org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA);
+            form.setDefaultResources(res);
+            form.setDefaultAppearance("/Helv 0 Tf 0 g");
+            var field = new org.apache.pdfbox.pdmodel.interactive.form.PDTextField(form);
+            field.setPartialName("nome_comprador");
+            var widget = field.getWidgets().get(0);
+            widget.setRectangle(new org.apache.pdfbox.pdmodel.common.PDRectangle(50, 700, 200, 20));
+            widget.setPage(page);
+            page.getAnnotations().add(widget);
+            form.getFields().add(field);
+            var baos = new java.io.ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        }
+    }
+
+    @Test
+    void detectsAndFillsAcroFormFields() throws Exception {
+        byte[] pdf = fillablePdf();
+
+        var fields = service.detectFormFields(pdf);
+        assertEquals(1, fields.size());
+        assertEquals("nome_comprador", fields.get(0).name());
+        assertEquals("text", fields.get(0).type());
+
+        byte[] filled = service.fillAndFlatten(pdf, Map.of("nome_comprador", "Ana Conceição"));
+        assertTrue(isPdf(filled), "Modelo preenchido deve continuar a ser um PDF válido");
+    }
+
+    @Test
+    void detectFormFieldsEmptyWhenNoAcroForm() {
+        byte[] plain = service.buildVisitForm(Map.of("listingTitle", "T2"), null);
+        assertTrue(service.detectFormFields(plain).isEmpty(), "PDF sem campos → lista vazia");
+    }
+
     @Test
     void longContentPaginatesWithoutError() {
         var longText = "Cláusula ".repeat(400); // força múltiplas páginas
