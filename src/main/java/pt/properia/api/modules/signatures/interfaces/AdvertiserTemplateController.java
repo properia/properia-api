@@ -5,6 +5,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.signatures.application.DocumentPdfService;
 import pt.properia.api.modules.signatures.application.DocumentTemplateService;
 import pt.properia.api.modules.signatures.application.DocumentTemplateService.CreateTemplateRequest;
 import pt.properia.api.shared.domain.DomainException;
@@ -21,9 +22,25 @@ import java.util.UUID;
 public class AdvertiserTemplateController {
 
     private final DocumentTemplateService service;
+    private final DocumentPdfService pdfService;
 
-    public AdvertiserTemplateController(DocumentTemplateService service) {
+    public AdvertiserTemplateController(DocumentTemplateService service, DocumentPdfService pdfService) {
         this.service = service;
+        this.pdfService = pdfService;
+    }
+
+    /**
+     * PDF de exemplo ilustrativo (não é um contrato) — mostra como criar um PDF prenchível
+     * e a convenção de nomes de campo para a IA reconhecer. Rota literal, avaliada antes de
+     * "/{id}" pelo Spring por ser um segmento exato.
+     */
+    @GetMapping("/example.pdf")
+    public ResponseEntity<byte[]> example() {
+        byte[] pdf = pdfService.buildSampleTemplate();
+        return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_PDF)
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"modelo-exemplo-properia.pdf\"")
+            .body(pdf);
     }
 
     @GetMapping

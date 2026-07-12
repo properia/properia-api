@@ -256,8 +256,11 @@ public class MediaController {
 
         String publicUrl;
         if (r2.isConfigured()) {
-            // Upload directly to R2 server-side — avoids /tmp ephemerality and CORS issues
-            publicUrl = r2.uploadBytes(objectKey, file.getBytes(), file.getContentType());
+            // Upload em STREAMING (não carrega a imagem inteira em heap) — evita o pico de
+            // memória que fazia a instância do Render reiniciar por OOM sob uploads concorrentes.
+            try (var in = file.getInputStream()) {
+                publicUrl = r2.uploadStream(objectKey, in, file.getSize(), file.getContentType());
+            }
         } else {
             var target = resolveLocalPath(objectKey);
             Files.createDirectories(target.getParent());

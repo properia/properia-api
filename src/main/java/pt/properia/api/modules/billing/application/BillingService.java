@@ -185,7 +185,7 @@ public class BillingService {
     // ── Plan info ─────────────────────────────────────────────────────────────
 
     public record PlanInfo(String planCode, String paymentStatus, int creditBalance,
-                           String trialActivatedAt, String stripeSubscriptionId) {}
+                           String trialActivatedAt, String trialEndsAt, String stripeSubscriptionId) {}
 
     public PlanInfo getPlanInfo(UUID advertiserId) {
         var snapshot = billingRepo.getSnapshot(advertiserId);
@@ -195,6 +195,10 @@ public class BillingService {
             meta.getOrDefault("paymentStatus", "none").toString(),
             snapshot.creditBalance(),
             meta.containsKey("trialActivatedAt") ? meta.get("trialActivatedAt").toString() : null,
+            // Fonte de verdade da duração do trial: gravado por activateTrial() (40 dias).
+            // Antes disto não era exposto e o controller recalculava com 14 dias hardcoded,
+            // provocando downgrade prematuro de agências ainda dentro do trial combinado.
+            meta.containsKey("trialEndsAt") ? meta.get("trialEndsAt").toString() : null,
             meta.containsKey("stripeSubscriptionId") ? meta.get("stripeSubscriptionId").toString() : null
         );
     }

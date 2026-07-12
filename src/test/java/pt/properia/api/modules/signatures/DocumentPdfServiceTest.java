@@ -183,6 +183,19 @@ class DocumentPdfServiceTest {
     }
 
     @Test
+    void sampleTemplateIsValidPdfWithDetectableFields() {
+        byte[] pdf = service.buildSampleTemplate();
+
+        assertTrue(isPdf(pdf), "O modelo de exemplo deve ser um PDF válido");
+
+        var fields = service.detectFormFields(pdf);
+        assertFalse(fields.isEmpty(), "O modelo de exemplo tem de ter campos AcroForm detetáveis (é o propósito do ficheiro)");
+        assertTrue(fields.stream().anyMatch(f -> f.name().equals("nome_comprador")));
+        assertTrue(fields.stream().anyMatch(f -> f.type().equals("checkbox")),
+            "Deve incluir um campo checkbox de exemplo, além dos campos de texto");
+    }
+
+    @Test
     void longContentPaginatesWithoutError() {
         var longText = "Cláusula ".repeat(400); // força múltiplas páginas
         var payload = Map.<String, Object>of(

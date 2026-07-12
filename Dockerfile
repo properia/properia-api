@@ -32,9 +32,11 @@ USER properia
 
 ENTRYPOINT ["java", \
   "-XX:+UseG1GC", \
-  "-XX:MaxRAMPercentage=60", \
+  "-XX:+ExitOnOutOfMemoryError", \
+  "-XX:MaxRAMPercentage=55", \
   "-XX:MaxMetaspaceSize=160m", \
   "-XX:ReservedCodeCacheSize=64m", \
+  "-XX:MaxDirectMemorySize=128m", \
   "-Xss512k", \
   "-Djava.net.preferIPv4Stack=true", \
   "-jar", "app.jar"]

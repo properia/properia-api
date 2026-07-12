@@ -485,7 +485,9 @@ public class AdvertiserMiscController {
                     : ".jpg";
             var objectKey = "advertisers/" + advertiserId + "/logo-" + UUID.randomUUID() + ext;
             if (r2.isConfigured()) {
-                logoUrl = r2.uploadBytes(objectKey, file.getBytes(), contentType);
+                try (var in = file.getInputStream()) {
+                    logoUrl = r2.uploadStream(objectKey, in, file.getSize(), contentType);
+                }
             } else {
                 var target = localStorageDir.resolve(
                     Paths.get(objectKey).normalize()).normalize();

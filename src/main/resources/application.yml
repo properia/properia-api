@@ -48,6 +48,9 @@ spring:
     multipart:
       max-file-size: 30MB
       max-request-size: 35MB
+      # Escreve o multipart para disco quase de imediato (não segura em heap). Combinado com
+      # o upload em streaming para o R2, o footprint de memória por upload passa a ser mínimo.
+      file-size-threshold: 4KB
 
   # ── Task execution (Virtual Threads) ─────────────────────────────────────────
   threads:

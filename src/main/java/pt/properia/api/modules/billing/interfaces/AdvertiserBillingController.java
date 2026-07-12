@@ -122,7 +122,11 @@ public class AdvertiserBillingController {
         if (info.trialActivatedAt() != null) {
             try {
                 var activatedAt = Instant.parse(info.trialActivatedAt());
-                var endsAt = activatedAt.plus(14, ChronoUnit.DAYS);
+                // Usa o trialEndsAt persistido por activateTrial() (40 dias — o combinado).
+                // Fallback só para trials legados ativados antes de este campo existir.
+                var endsAt = info.trialEndsAt() != null
+                    ? Instant.parse(info.trialEndsAt())
+                    : activatedAt.plus(40, ChronoUnit.DAYS);
                 var now = Instant.now();
                 if (now.isBefore(endsAt)) {
                     long days = ChronoUnit.DAYS.between(now, endsAt);

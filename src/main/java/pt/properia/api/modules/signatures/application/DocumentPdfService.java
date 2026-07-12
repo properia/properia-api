@@ -102,6 +102,142 @@ public class DocumentPdfService {
 
     public record FormFieldInfo(String name, String type) {}
 
+    /**
+     * PDF de exemplo, ilustrativo, para o anunciante perceber o que é um "PDF prenchível"
+     * (campos AcroForm) e como nomear os campos para a IA os preencher automaticamente.
+     * Não representa um contrato real — serve só de referência de formato.
+     */
+    public byte[] buildSampleTemplate() {
+        try (var doc = new PDDocument()) {
+            var page = new PDPage(PDRectangle.A4);
+            doc.addPage(page);
+
+            var form = new org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm(doc);
+            doc.getDocumentCatalog().setAcroForm(form);
+            var res = new org.apache.pdfbox.pdmodel.PDResources();
+            res.put(org.apache.pdfbox.cos.COSName.getPDFName("Helv"), PDType1Font.HELVETICA);
+            form.setDefaultResources(res);
+            form.setDefaultAppearance("/Helv 0 Tf 10 g");
+
+            float top = PAGE_H - MARGIN;
+            float y;
+            try (var cs = new PDPageContentStream(doc, page)) {
+                text(cs, PDType1Font.HELVETICA_BOLD, 17, MARGIN, top, "MODELO DE EXEMPLO (ilustrativo)");
+                y = top - 20;
+                text(cs, PDType1Font.HELVETICA, 10, MARGIN, y, "Este ficheiro NÃO é um contrato — mostra apenas como criar um PDF prenchível.");
+                y -= 26;
+                y = paragraphStatic(cs, y,
+                    "Um PDF \"prenchível\" tem campos de formulário (AcroForm) — as caixas retangulares que vês "
+                    + "abaixo. A Properia deteta esses campos automaticamente e preenche-os com os dados do "
+                    + "cliente/imóvel. O teu contrato deve ter os campos nos sítios onde hoje escreves à mão "
+                    + "(nome, NIF, morada, preço…). O texto à volta dos campos é 100% teu — nós nunca o alteramos.", 9);
+                y -= 10;
+                text(cs, PDType1Font.HELVETICA_BOLD, 10, MARGIN, y, "Como criar campos prenchíveis no teu contrato:");
+                y -= 16;
+                y = paragraphStatic(cs, y, "- Word/LibreOffice: separador \"Programador\"/\"Formulários\" - insere \"Controlo de conteúdo\" em cada espaço a preencher - exporta para PDF (mantém os campos).", 9);
+                y = paragraphStatic(cs, y, "- Adobe Acrobat: Ferramentas - \"Preparar Formulário\" - deteta os campos automaticamente a partir do teu PDF existente.", 9);
+                y -= 20;
+
+                text(cs, PDType1Font.HELVETICA_BOLD, 10, MARGIN, y, "Exemplo de campos (nomeados para a IA reconhecer):");
+                y -= 8;
+                cs.moveTo(MARGIN, y); cs.lineTo(PAGE_W - MARGIN, y); cs.setLineWidth(0.5f); cs.stroke();
+                y -= 22;
+            }
+
+            // Campos de exemplo — nomes alinhados com os rótulos usados no preenchimento por IA.
+            y = addField(doc, form, page, "nome_comprador", "Nome do comprador", y);
+            y = addField(doc, form, page, "email_comprador", "Email do comprador", y);
+            y = addField(doc, form, page, "nif_comprador", "NIF do comprador", y);
+            y -= 6;
+            y = addField(doc, form, page, "morada_imovel", "Morada do imóvel", y);
+            y = addField(doc, form, page, "preco_venda", "Preço de venda (€)", y);
+            y -= 6;
+            y = addField(doc, form, page, "nome_agencia", "Nome da agência (opcional — já preenchemos nós)", y);
+            y = addField(doc, form, page, "licenca_ami", "Licença AMI (opcional — já preenchemos nós)", y);
+            y -= 6;
+            y = addCheckbox(doc, form, page, "aceita_condicoes", "Exemplo de checkbox (ex.: \"Aceito as condições\")", y);
+
+            try (var cs2 = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+                y -= 30;
+                text(cs2, PDType1Font.HELVETICA, 8, MARGIN, y,
+                    "Dica: os nomes dos campos (nome_comprador, preco_venda…) são só um exemplo — usa os que fizerem sentido para o teu contrato.");
+            }
+
+            var baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Falha a gerar o modelo de exemplo: " + e.getMessage(), e);
+        }
+    }
+
+    private float addField(PDDocument doc, org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm form,
+                           PDPage page, String fieldName, String label, float y) throws Exception {
+        try (var cs = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+            text(cs, PDType1Font.HELVETICA, 9, MARGIN, y, label);
+        }
+        var field = new PDTextField(form);
+        field.setPartialName(fieldName);
+        field.setDefaultAppearance("/Helv 10 Tf 0 g");
+        var widget = field.getWidgets().get(0);
+        widget.setRectangle(new PDRectangle(MARGIN, y - 22, PAGE_W - 2 * MARGIN, 18));
+        widget.setPage(page);
+        var appearanceChars = new org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceCharacteristicsDictionary(
+            new org.apache.pdfbox.cos.COSDictionary());
+        appearanceChars.setBorderColour(new org.apache.pdfbox.pdmodel.graphics.color.PDColor(
+            new float[]{0.75f, 0.75f, 0.75f}, org.apache.pdfbox.pdmodel.graphics.color.PDDeviceGray.INSTANCE));
+        widget.setAppearanceCharacteristics(appearanceChars);
+        page.getAnnotations().add(widget);
+        form.getFields().add(field);
+        return y - 32;
+    }
+
+    private float addCheckbox(PDDocument doc, org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm form,
+                              PDPage page, String fieldName, String label, float y) throws Exception {
+        var field = new org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox(form);
+        field.setPartialName(fieldName);
+        var widget = field.getWidgets().get(0);
+        widget.setRectangle(new PDRectangle(MARGIN, y - 14, 14, 14));
+        widget.setPage(page);
+        page.getAnnotations().add(widget);
+        form.getFields().add(field);
+        try (var cs = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
+            text(cs, PDType1Font.HELVETICA, 9, MARGIN + 20, y - 10, label);
+        }
+        return y - 32;
+    }
+
+    private void text(PDPageContentStream cs, PDType1Font font, float size, float x, float y, String s) throws Exception {
+        cs.beginText();
+        cs.setFont(font, size);
+        cs.newLineAtOffset(x, y);
+        cs.showText(sanitize(s));
+        cs.endText();
+    }
+
+    /** Parágrafo com quebra de linha manual, para uso fora do motor Doc (página estática). */
+    private float paragraphStatic(PDPageContentStream cs, float y, String text, float size) throws Exception {
+        float maxWidth = PAGE_W - 2 * MARGIN;
+        var words = sanitize(text).split("\\s+");
+        var line = new StringBuilder();
+        for (var word : words) {
+            var attempt = line.isEmpty() ? word : line + " " + word;
+            float w = PDType1Font.HELVETICA.getStringWidth(attempt) / 1000 * size;
+            if (w > maxWidth && !line.isEmpty()) {
+                text(cs, PDType1Font.HELVETICA, size, MARGIN, y, line.toString());
+                y -= size + 4;
+                line = new StringBuilder(word);
+            } else {
+                line = new StringBuilder(attempt);
+            }
+        }
+        if (!line.isEmpty()) {
+            text(cs, PDType1Font.HELVETICA, size, MARGIN, y, line.toString());
+            y -= size + 4;
+        }
+        return y;
+    }
+
     /** Deteta os campos de formulário (AcroForm) de um PDF carregado. */
     public List<FormFieldInfo> detectFormFields(byte[] pdf) {
         try (var doc = org.apache.pdfbox.pdmodel.PDDocument.load(pdf)) {

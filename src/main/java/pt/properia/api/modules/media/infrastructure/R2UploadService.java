@@ -4,18 +4,25 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.CORSConfiguration;
+import software.amazon.awssdk.services.s3.model.CORSRule;
+import software.amazon.awssdk.services.s3.model.PutBucketCorsRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 
 @Service
 public class R2UploadService {
@@ -24,6 +31,7 @@ public class R2UploadService {
 
     private final R2Properties props;
     private final String cdnBaseUrl;
+    private final List<String> corsAllowedOrigins;
 
     // O S3Client/S3Presigner do AWS SDK são thread-safe e CAROS de construir
     // (pools HTTP, threads, providers). Criar um por upload provocava churn de
@@ -33,9 +41,43 @@ public class R2UploadService {
     private volatile S3Presigner s3Presigner;
 
     public R2UploadService(R2Properties props,
-                           @Value("${properia.media.cdn-base-url:}") String cdnBaseUrl) {
+                           @Value("${properia.media.cdn-base-url:}") String cdnBaseUrl,
+                           @Value("${properia.media.cors-allowed-origins:*}") String corsAllowedOrigins) {
         this.props = props;
         this.cdnBaseUrl = cdnBaseUrl.endsWith("/") ? cdnBaseUrl.substring(0, cdnBaseUrl.length() - 1) : cdnBaseUrl;
+        this.corsAllowedOrigins = Arrays.stream(corsAllowedOrigins.split(","))
+            .map(String::trim).filter(s -> !s.isBlank()).toList();
+    }
+
+    /**
+     * Aplica a política de CORS ao bucket R2 no arranque (best-effort). Sem isto, o PUT
+     * presigned directo do browser para o R2 é bloqueado pelo CORS e TUDO cai no fallback
+     * do servidor — o que provocava a pressão de memória/OOM. Configurar o CORS faz as
+     * imagens irem browser→R2 e o servidor deixa de as tocar.
+     *
+     * Requer permissão s3:PutBucketCors no token R2; se não a tiver, apenas regista um aviso.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void configureBucketCors() {
+        if (!isConfigured()) return;
+        try {
+            var rule = CORSRule.builder()
+                .allowedOrigins(corsAllowedOrigins.isEmpty() ? List.of("*") : corsAllowedOrigins)
+                .allowedMethods("PUT", "GET", "HEAD")
+                .allowedHeaders("*")
+                .exposeHeaders("ETag")
+                .maxAgeSeconds(3600)
+                .build();
+            s3().putBucketCors(PutBucketCorsRequest.builder()
+                .bucket(props.getBucket())
+                .corsConfiguration(CORSConfiguration.builder().corsRules(rule).build())
+                .build());
+            log.info("R2 CORS aplicado ao bucket '{}' (origens={}) — upload directo browser→R2 ativo.",
+                props.getBucket(), corsAllowedOrigins.isEmpty() ? "*" : corsAllowedOrigins);
+        } catch (Exception e) {
+            log.warn("Não foi possível aplicar CORS ao bucket R2 (o token precisa de s3:PutBucketCors). "
+                + "Configura-o no dashboard da Cloudflare para o upload directo funcionar. Detalhe: {}", e.getMessage());
+        }
     }
 
     public boolean isConfigured() {
@@ -115,6 +157,29 @@ public class R2UploadService {
 
         var publicUrl = publicUrlFor(objectKey);
         log.info("R2 direct upload: objectKey={} size={} publicUrl={}", objectKey, bytes.length, publicUrl);
+        return publicUrl;
+    }
+
+    /**
+     * Upload em STREAMING para o R2 — a imagem NÃO é carregada inteira em memória.
+     * Preferir a uploadBytes no caminho de multipart: o ficheiro é lido do disco temporário
+     * do multipart em pedaços, evitando o pico de heap (byte[] + cópia) que fazia a instância
+     * do Render rebentar por OOM sob uploads concorrentes.
+     */
+    public String uploadStream(String objectKey, java.io.InputStream in, long contentLength, String contentType) {
+        var ct = (contentType != null && !contentType.isBlank()) ? contentType : "image/jpeg";
+        s3().putObject(
+            PutObjectRequest.builder()
+                .bucket(props.getBucket())
+                .key(objectKey)
+                .contentType(ct)
+                .contentLength(contentLength)
+                .build(),
+            RequestBody.fromInputStream(in, contentLength)
+        );
+
+        var publicUrl = publicUrlFor(objectKey);
+        log.info("R2 stream upload: objectKey={} size={} publicUrl={}", objectKey, contentLength, publicUrl);
         return publicUrl;
     }
 
