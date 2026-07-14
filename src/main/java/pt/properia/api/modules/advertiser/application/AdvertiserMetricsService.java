@@ -344,7 +344,9 @@ public class AdvertiserMetricsService {
         var now = Instant.now();
         var ts7dAgo  = java.sql.Timestamp.from(now.minus(7, ChronoUnit.DAYS));
         var ts30dAgo = java.sql.Timestamp.from(now.minus(30, ChronoUnit.DAYS));
-        var ts48hAgo = java.sql.Timestamp.from(now.minus(48, ChronoUnit.HOURS));
+        // Limiar único de "precisa de seguimento" = 72h, alinhado com o bucket "late"
+        // da página de Leads. Antes o Radar usava 48h e a página 72h → o mesmo conceito
+        // aparecia com dois números diferentes ao mesmo utilizador.
         var ts72hAgo = java.sql.Timestamp.from(now.minus(72, ChronoUnit.HOURS));
 
         // Week label (ISO week / year)
@@ -405,7 +407,7 @@ public class AdvertiserMetricsService {
             .filter(e -> "confirmed".equals(e.getKey()) || "completed".equals(e.getKey()))
             .mapToInt(Map.Entry::getValue).sum();
 
-        // At-risk leads (stalled > 48h in non-proposal, > 72h in proposal)
+        // At-risk leads: sem seguimento > 72h (proposta usa o mesmo limiar). Alinhado com o bucket "late" da pagina de Leads para o CRM falar com um so numero.
         var atRiskRows = jdbc.sql("""
                 SELECT l.id::text, l.stage::text, l.contact_name,
                        l.updated_at, li.title AS listing_title
@@ -421,7 +423,7 @@ public class AdvertiserMetricsService {
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
-            .param("slaCutoff", ts48hAgo)
+            .param("slaCutoff", ts72hAgo)
             .param("proposalCutoff", ts72hAgo)
             .query((rs, n) -> {
                 var ts = rs.getTimestamp("updated_at");
@@ -438,7 +440,24 @@ public class AdvertiserMetricsService {
             })
             .list();
 
-        int atRiskCount = atRiskRows.size();
+        // Contagem REAL de leads em risco — a lista acima está limitada a 10 (top-10 p/
+        // a UI), mas o COUNT tem de ser o total: com size() o radar dizia "10 contactos
+        // precisam de seguimento" mesmo quando havia 100+ (o cap escondia a dimensão
+        // do problema e o healthScore nunca degradava além do limiar de 10).
+        int atRiskCount = jdbc.sql("""
+                SELECT COUNT(*)
+                FROM properia.leads l
+                WHERE l.advertiser_id = :adv
+                  AND l.stage::text NOT IN ('won','lost')
+                  AND (
+                    (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
+                    OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
+                  )
+                """)
+            .param("adv", advertiserId)
+            .param("slaCutoff", ts72hAgo)
+            .param("proposalCutoff", ts72hAgo)
+            .query(Long.class).single().intValue();
 
         // Total de leads (histórico) — para distinguir uma conta SEM atividade de uma
         // com problemas. Sem isto, uma conta nova (0 leads) caía em "attention" por causa

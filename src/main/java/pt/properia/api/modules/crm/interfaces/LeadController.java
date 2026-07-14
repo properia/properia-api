@@ -31,6 +31,28 @@ public class LeadController {
     private final ObjectMapper objectMapper;
     private final BillingService billingService;
 
+    // ── Lead score (0–88) — VALOR do lead, para a lente "Prioritários" ──────────
+    // Requer os joins `li` (listings) e `lp` (listing_pricing) na query. Buckets:
+    // high >=45, medium 25–44, low <25. Ver list() para a derivação de `priority`.
+    private static final String LEAD_SCORE = """
+        CASE l.stage::text
+          WHEN 'proposal' THEN 30 WHEN 'visit_scheduled' THEN 24 WHEN 'qualified' THEN 22
+          WHEN 'contacted' THEN 10 WHEN 'new' THEN 4 ELSE 0 END
+        + CASE
+            WHEN l.metadata->>'decisionDossier' IS NOT NULL OR l.metadata->>'chatQualification' IS NOT NULL THEN 25
+            WHEN l.source::text IN ('visit_request','contact_request') THEN 14
+            WHEN l.source::text = 'chat' THEN 8 ELSE 2 END
+        + CASE
+            WHEN lp.list_price IS NULL THEN 8
+            WHEN li.business_type::text = 'rent' THEN
+              CASE WHEN lp.list_price >= 2000 THEN 25 WHEN lp.list_price >= 1200 THEN 18
+                   WHEN lp.list_price >= 700 THEN 12 ELSE 6 END
+            ELSE
+              CASE WHEN lp.list_price >= 600000 THEN 25 WHEN lp.list_price >= 300000 THEN 18
+                   WHEN lp.list_price >= 150000 THEN 12 ELSE 6 END END
+        + CASE WHEN l.created_at > now() - interval '48 hours' THEN 8 ELSE 0 END
+        """;
+
     public LeadController(
             CreateLeadUseCase createLead,
             UpdateLeadStageUseCase updateLeadStage,
@@ -117,23 +139,30 @@ public class LeadController {
             whereParts.add("l.created_at <= :dateTo::timestamptz");
             params.put("dateTo", dateTo);
         }
-        // slaBucket/priority derivam da idade do lead (mesmos limiares usados no cálculo
-        // do payload abaixo: fresh/low <24h, attention/medium <72h, late/high >=72h).
-        // Têm de ir para o WHERE em SQL — filtrar em memória DEPOIS do LIMIT/OFFSET
-        // corta a página antes do filtro e desalinha o total/totalPages devolvidos.
+        // ── slaBucket (TEMPO) vs priority (VALOR) — duas lentes distintas ──────────
+        // slaBucket deriva da IDADE (fresh <24h, attention <72h, late >=72h) → higiene
+        // de resposta ("estou a falhar no tempo"). Tem de ir para o WHERE em SQL —
+        // filtrar em memória DEPOIS do LIMIT/OFFSET desalinha total/totalPages.
+        // Leads fechados (won/lost) não têm SLA pendente, por isso são excluídos.
+        final String activeOnly = " AND l.stage::text NOT IN ('won','lost')";
         if (slaBucket != null && !slaBucket.isBlank() && !"todas".equals(slaBucket)) {
             whereParts.add(switch (slaBucket) {
-                case "fresh" -> "l.created_at > now() - interval '24 hours'";
-                case "attention" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'";
-                case "late" -> "l.created_at <= now() - interval '72 hours'";
+                case "fresh" -> "l.created_at > now() - interval '24 hours'" + activeOnly;
+                case "attention" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'" + activeOnly;
+                case "late" -> "l.created_at <= now() - interval '72 hours'" + activeOnly;
                 default -> "true";
             });
         }
+        // priority deriva de um LEAD SCORE de VALOR (não da idade — antes era um
+        // duplicado exato de slaBucket). Combina proximidade ao fecho (etapa),
+        // intenção/qualificação (dossier·chat·origem), valor do imóvel (preço, venda
+        // vs arrendamento) e um leve bónus de frescura. Responde a "onde investir
+        // energia primeiro", complementar a "onde estou atrasado" (slaBucket).
         if (priority != null && !priority.isBlank() && !"todas".equals(priority)) {
             whereParts.add(switch (priority) {
-                case "low" -> "l.created_at > now() - interval '24 hours'";
-                case "medium" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'";
-                case "high" -> "l.created_at <= now() - interval '72 hours'";
+                case "high" -> "(" + LEAD_SCORE + ") >= 45" + activeOnly;
+                case "medium" -> "(" + LEAD_SCORE + ") >= 25 AND (" + LEAD_SCORE + ") < 45" + activeOnly;
+                case "low" -> "(" + LEAD_SCORE + ") < 25";
                 default -> "true";
             });
         }
@@ -143,22 +172,28 @@ public class LeadController {
         int safePage = Math.max(1, page);
         int offset = (safePage - 1) * safePageSize;
 
-        var countSql = "SELECT COUNT(*) FROM properia.leads l " + whereClause;
+        // li + lp juntos (mesmo em count) porque o filtro de prioridade referencia
+        // o LEAD_SCORE, que usa li.business_type e lp.list_price. LEFT JOINs indexados
+        // por listing_id — custo negligenciável.
+        var fromClause = """
+                FROM properia.leads l
+                LEFT JOIN properia.listings li ON li.id = l.listing_id
+                LEFT JOIN properia.listing_pricing lp ON lp.listing_id = l.listing_id
+                """;
+        var countSql = "SELECT COUNT(*) " + fromClause + whereClause;
         var countQuery = jdbc.sql(countSql);
         for (var e : params.entrySet()) countQuery = countQuery.param(e.getKey(), e.getValue());
         long total = countQuery.query(Long.class).single();
 
-        var listSql = """
-                SELECT l.id, l.listing_id, l.advertiser_id, l.source, l.stage,
-                       l.intent_type, l.message, l.contact_name, l.contact_email,
-                       l.contact_phone, l.contact_revealed_at, l.assigned_to, l.metadata,
-                       l.created_at, l.updated_at,
-                       li.id AS li_id, li.public_id AS li_public_id,
-                       li.title AS li_title, li.business_type AS li_business_type,
-                       li.status AS li_status, li.city AS li_city, li.district AS li_district
-                FROM properia.leads l
-                LEFT JOIN properia.listings li ON li.id = l.listing_id
-                """ + whereClause + " ORDER BY l.created_at DESC LIMIT :lim OFFSET :off";
+        var listSql = "SELECT l.id, l.listing_id, l.advertiser_id, l.source, l.stage,"
+                + " l.intent_type, l.message, l.contact_name, l.contact_email,"
+                + " l.contact_phone, l.contact_revealed_at, l.assigned_to, l.metadata,"
+                + " l.created_at, l.updated_at,"
+                + " li.id AS li_id, li.public_id AS li_public_id,"
+                + " li.title AS li_title, li.business_type AS li_business_type,"
+                + " li.status AS li_status, li.city AS li_city, li.district AS li_district,"
+                + " (" + LEAD_SCORE + ") AS lead_score "
+                + fromClause + whereClause + " ORDER BY l.created_at DESC LIMIT :lim OFFSET :off";
         var listQuery = jdbc.sql(listSql);
         for (var e : params.entrySet()) listQuery = listQuery.param(e.getKey(), e.getValue());
         listQuery = listQuery.param("lim", safePageSize).param("off", offset);
@@ -201,7 +236,16 @@ public class LeadController {
             long ageHours = Duration.between(createdAt, now).toHours();
             String bucket = ageHours < 24 ? "fresh" : ageHours < 72 ? "attention" : "late";
             m.put("slaBucket", bucket);
-            m.put("priority", ageHours >= 72 ? "high" : ageHours >= 24 ? "medium" : "low");
+
+            // priority = bucket do LEAD_SCORE (valor), decoupled da idade. Leads
+            // fechados (won/lost) nunca são "high" — o score dá-lhes etapa 0, mas
+            // forçamos low para a UI nunca marcar um negócio ganho como prioritário.
+            var stg = rs.getString("stage");
+            boolean closedStage = "won".equals(stg) || "lost".equals(stg);
+            int leadScore = rs.getInt("lead_score");
+            String priorityBucket = closedStage ? "low"
+                : leadScore >= 45 ? "high" : leadScore >= 25 ? "medium" : "low";
+            m.put("priority", priorityBucket);
 
             // Metadata — parse jsonb, default to safe shape
             var metaJson = rs.getString("metadata");

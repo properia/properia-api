@@ -582,16 +582,22 @@ public class JdbcSearchRepository implements SearchRepository {
         };
     }
 
+    // Aceita DOIS vocabulários: os ids canónicos do catálogo FE (lib/property-types.ts,
+    // usados pela home, modal de filtros e cadastro) e os aliases dos parsers de
+    // linguagem natural (estudio, quinta, villa, geminada). Sem os canónicos, filtrar
+    // por "vivenda"/"moradia_geminada"/"quinta_herdade" caía no passthrough e comparava
+    // com valores inexistentes no enum → 0 resultados silenciosos.
     private String mapPropertyType(String tipo) {
         return switch (tipo) {
             case "apartamento" -> "apartment";
             case "moradia" -> "house";
-            case "estudio" -> "studio";
+            case "studio", "estudio" -> "studio";
             case "penthouse" -> "penthouse";
             case "duplex" -> "duplex";
             case "loft" -> "loft";
-            case "geminada" -> "semi_detached_house";
-            case "villa" -> "villa";
+            case "moradia_em_banda" -> "townhouse";
+            case "moradia_geminada", "geminada" -> "semi_detached_house";
+            case "vivenda", "villa" -> "villa";
             case "quarto" -> "room";
             case "terreno" -> "land";
             case "comercial" -> "commercial";
@@ -600,7 +606,7 @@ public class JdbcSearchRepository implements SearchRepository {
             case "armazem" -> "warehouse";
             case "industrial" -> "industrial";
             case "garagem" -> "garage";
-            case "quinta" -> "farm";
+            case "quinta_herdade", "quinta" -> "farm";
             case "hotel" -> "hotel";
             case "predio" -> "building";
             default -> tipo; // pass through if already a db value
