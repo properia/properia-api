@@ -423,6 +423,9 @@ public class PublicListingController {
 
     // ── Featured listings (home page pool) ────────────────────────────────────
 
+    // Cacheado (TTL 3 min): conteúdo público de marketing, sem args → 1 só chave.
+    // Evita a query com subquery de views por linha a cada regeneração da home.
+    @org.springframework.cache.annotation.Cacheable(pt.properia.api.shared.infrastructure.CacheConfig.FEATURED)
     @GetMapping("/featured")
     public ResponseEntity<?> getFeaturedListings() {
         var items = jdbc.sql("""

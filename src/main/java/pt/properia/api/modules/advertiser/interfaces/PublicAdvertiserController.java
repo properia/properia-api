@@ -18,6 +18,8 @@ public class PublicAdvertiserController {
         this.jdbc = jdbc;
     }
 
+    // Cacheado (TTL 3 min): vitrine pública de agências, muda raramente.
+    @org.springframework.cache.annotation.Cacheable(pt.properia.api.shared.infrastructure.CacheConfig.SHOWCASE)
     @GetMapping("/api/public/advertisers/showcase")
     public ResponseEntity<?> showcase() {
         var items = jdbc.sql("""
