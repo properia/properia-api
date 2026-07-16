@@ -505,6 +505,88 @@ public class PublicListingController {
         return ResponseEntity.ok(Map.of("data", Map.of("items", items)));
     }
 
+    // ── Sugestão de preço da zona ──────────────────────────────────────────────
+
+    /**
+     * Mediana do preço/m² de anúncios publicados na mesma zona e tipo de imóvel.
+     * Usado pelo formulário de anúncio para orientar particulares sem noção de
+     * mercado. Dois níveis: freguesia (mais preciso) → cidade (fallback).
+     * Mediana em vez de média: um único anúncio de luxo não distorce a sugestão.
+     */
+    @GetMapping("/price-suggestion")
+    public ResponseEntity<?> getPriceSuggestion(
+        @RequestParam String city,
+        @RequestParam(required = false) String parish,
+        @RequestParam String propertyType,
+        @RequestParam(defaultValue = "sale") String businessType
+    ) {
+        if (city.isBlank() || propertyType.isBlank()) {
+            return ResponseEntity.ok(Map.of("data", noSuggestion()));
+        }
+
+        if (parish != null && !parish.isBlank()) {
+            var byParish = queryPriceSuggestion(city, parish, propertyType, businessType);
+            if (byParish != null) {
+                byParish.put("scope", "parish");
+                return ResponseEntity.ok(Map.of("data", byParish));
+            }
+        }
+
+        var byCity = queryPriceSuggestion(city, null, propertyType, businessType);
+        if (byCity != null) {
+            byCity.put("scope", "city");
+            return ResponseEntity.ok(Map.of("data", byCity));
+        }
+
+        return ResponseEntity.ok(Map.of("data", noSuggestion()));
+    }
+
+    private Map<String, Object> noSuggestion() {
+        var m = new LinkedHashMap<String, Object>();
+        m.put("pricePerM2", null);
+        m.put("sampleSize", 0);
+        m.put("scope", "none");
+        return m;
+    }
+
+    private LinkedHashMap<String, Object> queryPriceSuggestion(
+        String city, String parish, String propertyType, String businessType
+    ) {
+        var rows = jdbc.sql("""
+                SELECT COUNT(*)::int AS sample_size,
+                       percentile_cont(0.5) WITHIN GROUP (
+                           ORDER BY l.price_amount / l.usable_area_m2
+                       ) AS median_ppm2
+                FROM properia.listings l
+                WHERE l.status = 'published'
+                  AND l.business_type::text = :businessType
+                  AND l.property_type::text = :propertyType
+                  AND lower(l.city) = lower(:city)
+                  AND (:parish::text IS NULL OR lower(l.parish) = lower(:parish))
+                  AND l.price_amount > 0
+                  AND l.usable_area_m2 > 0
+                """)
+            .param("city", city)
+            .param("parish", parish)
+            .param("propertyType", propertyType)
+            .param("businessType", businessType)
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("sampleSize", rs.getInt("sample_size"));
+                var median = rs.getBigDecimal("median_ppm2");
+                m.put("pricePerM2", median != null ? median.setScale(0, java.math.RoundingMode.HALF_UP) : null);
+                return m;
+            }).list();
+
+        if (rows.isEmpty()) return null;
+        var row = rows.get(0);
+        // Menos de 3 anúncios comparáveis não é amostra — devolver sugestão
+        // baseada em 1-2 imóveis induzia o particular em erro.
+        int sample = (int) row.get("sampleSize");
+        if (sample < 3 || row.get("pricePerM2") == null) return null;
+        return row;
+    }
+
     // ── Sitemap entries ────────────────────────────────────────────────────────
 
     @GetMapping("/sitemap-entries")

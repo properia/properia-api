@@ -118,6 +118,51 @@ public class AuthEmailService {
         );
     }
 
+    /**
+     * Relatório semanal para proprietários particulares — resumo da atividade
+     * do anúncio nos últimos 7 dias com CTA de volta ao painel.
+     */
+    public void sendWeeklyOwnerReport(String to, String firstName, int views, int leads, int visits, int publishedListings) {
+        String greeting = (firstName != null && !firstName.isBlank()) ? "Olá " + firstName + "," : "Olá,";
+        String plural = publishedListings == 1 ? "O teu anúncio" : "Os teus " + publishedListings + " anúncios";
+        String subject = leads > 0
+            ? plural + " na Properia: " + leads + (leads == 1 ? " pessoa interessada" : " pessoas interessadas") + " esta semana"
+            : plural + " na Properia: " + views + (views == 1 ? " visualização" : " visualizações") + " esta semana";
+        String url = appUrl + "/anunciante";
+
+        String statsHtml = """
+            <table cellpadding="0" cellspacing="0" width="100%%" style="margin:24px 0">
+              <tr>
+                <td align="center" style="padding:16px 8px;background:#f8f6f2;border-radius:14px 0 0 14px">
+                  <p style="margin:0;font-size:28px;font-weight:800;color:#1a1a1a">%d</p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Visualizações</p>
+                </td>
+                <td align="center" style="padding:16px 8px;background:#f8f6f2">
+                  <p style="margin:0;font-size:28px;font-weight:800;color:#c4622d">%d</p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Interessados</p>
+                </td>
+                <td align="center" style="padding:16px 8px;background:#f8f6f2;border-radius:0 14px 14px 0">
+                  <p style="margin:0;font-size:28px;font-weight:800;color:#1a1a1a">%d</p>
+                  <p style="margin:4px 0 0;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Pedidos de visita</p>
+                </td>
+              </tr>
+            </table>
+            """.formatted(views, leads, visits);
+
+        String intro = leads > 0
+            ? greeting + "<br><br>Boas notícias — esta semana <strong>" + leads + (leads == 1 ? " pessoa mostrou" : " pessoas mostraram") + " interesse</strong> no teu imóvel. Responde depressa: quem não recebe resposta em 24h costuma passar ao anúncio seguinte."
+            : greeting + "<br><br>O teu anúncio continua a trabalhar por ti. Aqui está o resumo dos últimos 7 dias:";
+
+        send(to,
+            subject,
+            html("O teu resumo semanal",
+                intro + statsHtml +
+                "Dica: anúncios com fotos atualizadas e preço alinhado com a zona recebem mais contactos.",
+                leads > 0 ? "Ver interessados" : "Ver o meu anúncio", url),
+            greeting + "\nResumo da semana na Properia: " + views + " visualizações · " + leads + " interessados · " + visits + " pedidos de visita.\nVê tudo em: " + url
+        );
+    }
+
     private void send(String to, String subject, String htmlBody, String textBody) {
         if (!enabled) {
             log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
