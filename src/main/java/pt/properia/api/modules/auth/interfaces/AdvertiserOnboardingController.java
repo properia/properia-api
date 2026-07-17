@@ -25,6 +25,25 @@ public class AdvertiserOnboardingController {
 
     private static final String SESSION_COOKIE = "properia_session";
 
+    private static final Set<String> VALID_ADVERTISER_TYPES = Set.of(
+        "private_owner", "consultant", "agency", "promoter", "developer", "bank_asset_manager");
+    private static final Set<String> VALID_STEPS = Set.of(
+        "intent", "basic_profile", "commercial_identity", "market_scope", "first_listing", "done");
+    private static final Set<String> VALID_LISTING_AUTHORITY_TYPES = Set.of(
+        "own_entity", "third_party", "both");
+    private static final Set<String> VALID_LICENSED_ENTITY_RELATIONSHIPS = Set.of(
+        "license_holder", "associated_consultant", "authorized_representative");
+    // Mesma lista de distritos do wizard FE (PT_DISTRICTS) — inclui as regiões autónomas.
+    private static final Set<String> VALID_DISTRICTS = Set.of(
+        "Aveiro", "Beja", "Braga", "Bragança", "Castelo Branco", "Coimbra",
+        "Évora", "Faro", "Guarda", "Leiria", "Lisboa", "Portalegre",
+        "Porto", "Santarém", "Setúbal", "Viana do Castelo", "Vila Real", "Viseu",
+        "Madeira", "Açores");
+    private static final java.util.regex.Pattern EMAIL_PATTERN =
+        java.util.regex.Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$");
+    private static final java.util.regex.Pattern PHONE_PATTERN =
+        java.util.regex.Pattern.compile("^[+0-9()\\-\\s/]{9,20}$");
+
     private static final Logger log = LoggerFactory.getLogger(AdvertiserOnboardingController.class);
 
     private final JdbcClient jdbc;
@@ -69,9 +88,99 @@ public class AdvertiserOnboardingController {
         var advertiserId = UUID.fromString((String) adv.get("advertiserId"));
         var advertiserTypeSelected = (String) adv.get("advertiserTypeSelected");
 
-        // Validação server-side de NIF/AMI — o wizard já valida isto no cliente, mas nada
-        // impedia um PATCH direto de gravar um NIF inválido ou saltar a licença AMI
-        // (obrigatória por lei — Lei n.º 15/2013 — para agências/consultores).
+        // ── Mudança de tipo de anunciante ─────────────────────────────────────
+        // Sem isto, quem escolhia o tipo errado no arranque ficava preso para
+        // sempre (o /start devolve 409 se já existe advertiser). Só permitimos
+        // mudar enquanto a identidade comercial não foi concluída — depois disso
+        // os dados fiscais/AMI já foram declarados para o tipo anterior.
+        // Nota: os benefícios de arranque (trial/créditos) NÃO são reatribuídos
+        // ao mudar de tipo, para não permitir farmar trials trocando de tipo.
+        if (body.get("advertiserType") != null) {
+            var newType = body.get("advertiserType").toString();
+            if (!VALID_ADVERTISER_TYPES.contains(newType)) {
+                throw new DomainException("INVALID_ADVERTISER_TYPE", "Tipo de anunciante inválido.", 422);
+            }
+            var completedRaw = adv.get("completedSteps");
+            var identityDone = completedRaw instanceof List<?> list && list.contains("commercial_identity");
+            if (identityDone) {
+                throw new DomainException("TYPE_CHANGE_LOCKED",
+                    "Já não é possível mudar o tipo de anunciante depois de concluir a identidade comercial. Contacta o suporte.", 422);
+            }
+            if (!newType.equals(advertiserTypeSelected)) {
+                jdbc.sql("UPDATE properia.advertisers SET advertiser_type = :t::properia.advertiser_type, updated_at = now() WHERE id = :id")
+                    .param("t", newType).param("id", advertiserId).update();
+                jdbc.sql("UPDATE properia.advertiser_onboarding SET advertiser_type_selected = :t::properia.advertiser_type, updated_at = now() WHERE advertiser_id = :id")
+                    .param("t", newType).param("id", advertiserId).update();
+                advertiserTypeSelected = newType;
+            }
+        }
+
+        // ── Validação server-side ─────────────────────────────────────────────
+        // O wizard valida no cliente, mas nada impedia um PATCH direto de gravar
+        // valores inválidos — incluindo casts de enum que rebentavam com 500 e
+        // URLs javascript: que ficariam no perfil público (XSS via href).
+        if (body.get("stepCurrent") != null && !VALID_STEPS.contains(body.get("stepCurrent").toString())) {
+            throw new DomainException("INVALID_STEP", "Etapa de onboarding inválida.", 422);
+        }
+        if (body.get("markStepCompleted") != null && !VALID_STEPS.contains(body.get("markStepCompleted").toString())) {
+            throw new DomainException("INVALID_STEP", "Etapa de onboarding inválida.", 422);
+        }
+        if (body.get("brandName") != null) {
+            var name = body.get("brandName").toString().strip();
+            if (name.length() < 2 || name.length() > 160) {
+                throw new DomainException("INVALID_BRAND_NAME",
+                    "O nome comercial deve ter entre 2 e 160 caracteres.", 422);
+            }
+        }
+        if (body.get("email") != null && !body.get("email").toString().isBlank()
+            && !EMAIL_PATTERN.matcher(body.get("email").toString().strip()).matches()) {
+            throw new DomainException("INVALID_EMAIL", "Indica um email válido (ex.: nome@empresa.pt).", 422);
+        }
+        if (body.get("phone") != null && !body.get("phone").toString().isBlank()
+            && !PHONE_PATTERN.matcher(body.get("phone").toString().strip()).matches()) {
+            throw new DomainException("INVALID_PHONE", "Indica um telefone válido (ex.: +351 912 345 678).", 422);
+        }
+        if (body.get("websiteUrl") != null && !body.get("websiteUrl").toString().isBlank()) {
+            var url = body.get("websiteUrl").toString().strip().toLowerCase();
+            if (!(url.startsWith("https://") || url.startsWith("http://")) || url.length() > 500) {
+                throw new DomainException("INVALID_WEBSITE_URL",
+                    "O website deve começar com https:// (ex.: https://agencia.pt).", 422);
+            }
+        }
+        if (body.get("businessCountry") != null && !body.get("businessCountry").toString().isBlank()
+            && !"PT".equalsIgnoreCase(body.get("businessCountry").toString().strip())) {
+            throw new DomainException("INVALID_COUNTRY",
+                "Neste lançamento, suportamos apenas anunciantes com identificação fiscal portuguesa.", 422);
+        }
+        if (body.get("businessPostalCode") != null && !body.get("businessPostalCode").toString().isBlank()
+            && !body.get("businessPostalCode").toString().strip().matches("\\d{4}-\\d{3}")) {
+            throw new DomainException("INVALID_POSTAL_CODE", "Usa o formato XXXX-XXX (ex.: 1000-001).", 422);
+        }
+        if (body.get("listingAuthorityType") != null && !body.get("listingAuthorityType").toString().isBlank()
+            && !VALID_LISTING_AUTHORITY_TYPES.contains(body.get("listingAuthorityType").toString())) {
+            throw new DomainException("INVALID_INPUT", "Tipo de autoridade de anúncio inválido.", 422);
+        }
+        if (body.get("licensedEntityRelationship") != null && !body.get("licensedEntityRelationship").toString().isBlank()
+            && !VALID_LICENSED_ENTITY_RELATIONSHIPS.contains(body.get("licensedEntityRelationship").toString())) {
+            throw new DomainException("INVALID_INPUT", "Relação com a entidade licenciada inválida.", 422);
+        }
+        if (body.get("licensedEntityTaxNumber") != null && !body.get("licensedEntityTaxNumber").toString().isBlank()
+            && !isValidPortugueseTaxNumber(body.get("licensedEntityTaxNumber").toString())) {
+            throw new DomainException("INVALID_LICENSED_ENTITY_TAX_NUMBER",
+                "O NIF/NIPC da entidade licenciada não é válido.", 422);
+        }
+        if (body.containsKey("serviceDistricts")) {
+            if (!(body.get("serviceDistricts") instanceof List<?> districts) || districts.size() > VALID_DISTRICTS.size()
+                || !districts.stream().allMatch(d -> d instanceof String s && VALID_DISTRICTS.contains(s))) {
+                throw new DomainException("INVALID_INPUT", "Lista de distritos de atuação inválida.", 422);
+            }
+        }
+        if (body.containsKey("propertySpecialties")) {
+            if (!(body.get("propertySpecialties") instanceof List<?> specs) || specs.size() > 20
+                || !specs.stream().allMatch(s -> s instanceof String str && str.length() <= 60)) {
+                throw new DomainException("INVALID_INPUT", "Lista de especialidades inválida.", 422);
+            }
+        }
         if (body.get("taxNumber") != null) {
             var tax = body.get("taxNumber").toString();
             if (!tax.isBlank() && !isValidPortugueseTaxNumber(tax)) {
@@ -102,6 +211,47 @@ public class AdvertiserOnboardingController {
                 if (!isValidAmiLicenseNumber(effectiveLicense != null ? effectiveLicense : "")) {
                     throw new DomainException("INVALID_AMI_LICENSE",
                         "É necessário um número AMI válido para concluir esta etapa (obrigatório por lei para mediação imobiliária).", 422);
+                }
+            }
+        }
+
+        // Regras da etapa "market_scope" — antes só o cliente as aplicava; um PATCH
+        // direto concluía a etapa sem a declaração de propriedade (particulares) ou
+        // sem indicar a autoridade de anúncio (promotor/developer/asset manager).
+        if ("market_scope".equals(body.get("markStepCompleted"))) {
+            if ("private_owner".equals(advertiserTypeSelected)) {
+                boolean accepted = body.containsKey("ownershipDeclarationAccepted")
+                    ? Boolean.TRUE.equals(body.get("ownershipDeclarationAccepted"))
+                    : Boolean.TRUE.equals(adv.get("ownershipDeclarationAccepted"));
+                if (!accepted) {
+                    throw new DomainException("OWNERSHIP_DECLARATION_REQUIRED",
+                        "Confirma que tens autorização para anunciar o imóvel antes de continuar.", 422);
+                }
+            }
+            if (Set.of("promoter", "developer", "bank_asset_manager").contains(advertiserTypeSelected)) {
+                var authority = body.containsKey("listingAuthorityType")
+                    ? stringOrNull(body.get("listingAuthorityType"))
+                    : stringOrNull(adv.get("listingAuthorityType"));
+                if (authority == null || authority.isBlank()) {
+                    throw new DomainException("LISTING_AUTHORITY_REQUIRED",
+                        "Indica se vais anunciar imóveis próprios ou de terceiros.", 422);
+                }
+                // Imóveis de terceiros exigem enquadramento AMI (Lei n.º 15/2013):
+                // licença própria válida OU entidade licenciada identificada.
+                if (!"own_entity".equals(authority)) {
+                    var license = body.containsKey("licenseNumber")
+                        ? stringOrNull(body.get("licenseNumber")) : (String) adv.get("licenseNumber");
+                    var entityName = body.containsKey("licensedEntityName")
+                        ? stringOrNull(body.get("licensedEntityName")) : stringOrNull(adv.get("licensedEntityName"));
+                    var entityTax = body.containsKey("licensedEntityTaxNumber")
+                        ? stringOrNull(body.get("licensedEntityTaxNumber")) : stringOrNull(adv.get("licensedEntityTaxNumber"));
+                    boolean hasOwnAmi = license != null && isValidAmiLicenseNumber(license);
+                    boolean hasEntity = entityName != null && !entityName.isBlank()
+                        && entityTax != null && isValidPortugueseTaxNumber(entityTax);
+                    if (!hasOwnAmi && !hasEntity) {
+                        throw new DomainException("THIRD_PARTY_AUTHORITY_REQUIRED",
+                            "Para anunciar imóveis de terceiros, indica a tua licença AMI ou a mediadora licenciada (nome e NIF) que te representa.", 422);
+                    }
                 }
             }
         }
@@ -228,7 +378,18 @@ public class AdvertiserOnboardingController {
         }
 
         var advertiserType = body.getOrDefault("advertiserType", "private_owner").toString();
-        var brandName = body.containsKey("brandName") ? body.get("brandName").toString() : claims.name();
+        // Sem validar o enum aqui, o cast ::properia.advertiser_type rebentava com
+        // um erro SQL (500) em vez de uma resposta 422 legível.
+        if (!VALID_ADVERTISER_TYPES.contains(advertiserType)) {
+            throw new DomainException("INVALID_ADVERTISER_TYPE", "Tipo de anunciante inválido.", 422);
+        }
+        var brandName = body.containsKey("brandName") && body.get("brandName") != null
+            ? body.get("brandName").toString().strip() : claims.name();
+        if (brandName == null || brandName.strip().length() < 2 || brandName.strip().length() > 160) {
+            throw new DomainException("INVALID_BRAND_NAME",
+                "O nome comercial deve ter entre 2 e 160 caracteres.", 422);
+        }
+        brandName = brandName.strip();
         var id = UUID.randomUUID();
         var slug = generateSlug(brandName, id);
 
