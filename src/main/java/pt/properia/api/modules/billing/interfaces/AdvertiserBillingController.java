@@ -122,8 +122,10 @@ public class AdvertiserBillingController {
         if (info.trialActivatedAt() != null) {
             try {
                 var activatedAt = Instant.parse(info.trialActivatedAt());
-                // Usa o trialEndsAt persistido por activateTrial() (40 dias — o combinado).
-                // Fallback só para trials legados ativados antes de este campo existir.
+                // Usa o trialEndsAt persistido por activateTrial() (180 dias — o combinado atual).
+                // Fallback só para trials legados ativados antes de este campo existir — esses
+                // foram concedidos ao abrigo da regra antiga (40 dias), por isso mantém-se 40
+                // aqui para não estender retroativamente trials já em curso ou já expirados.
                 var endsAt = info.trialEndsAt() != null
                     ? Instant.parse(info.trialEndsAt())
                     : activatedAt.plus(40, ChronoUnit.DAYS);

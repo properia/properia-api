@@ -426,12 +426,13 @@ public class AdvertiserOnboardingController {
             .param("adv", id).param("uid", claims.userId())
             .param("type", advertiserType).update();
 
-        // Agencies get a 40-day Business trial; all others get 3 welcome credits
-        if ("agency".equals(advertiserType)) {
+        // Contas profissionais (tudo exceto particular) recebem 6 meses de trial
+        // Business; particulares recebem 100 créditos de boas-vindas no Starter.
+        if (!"private_owner".equals(advertiserType)) {
             try { billingService.activateTrial(id); }
             catch (Exception e) { log.warn("Onboarding: falha ao ativar trial para advertiser {}: {}", id, e.getMessage()); }
         } else {
-            try { billingService.grantWelcomeCredits(id, 3); }
+            try { billingService.grantWelcomeCredits(id, 100); }
             catch (Exception e) { log.warn("Onboarding: falha ao conceder créditos de boas-vindas para advertiser {}: {}", id, e.getMessage()); }
         }
 

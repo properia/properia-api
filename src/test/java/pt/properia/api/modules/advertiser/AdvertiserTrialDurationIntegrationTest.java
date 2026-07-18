@@ -18,11 +18,15 @@ import static org.hamcrest.Matchers.*;
 
 /**
  * Regressão do bug: GET /api/advertiser/plan recalculava o fim do trial com 14 dias
- * hardcoded, ignorando o trialEndsAt de 40 dias já gravado por BillingService.activateTrial().
- * Isto fazia downgrade prematuro (para "starter") de agências entre o dia 14 e o dia 40
- * do trial combinado.
+ * hardcoded, ignorando o trialEndsAt já gravado por BillingService.activateTrial().
+ * Isto fazia downgrade prematuro (para "starter") de agências dentro do trial combinado.
+ *
+ * O trial passou de 40 para 180 dias (6 meses) — os testes 1-3 cobrem a duração atual.
+ * O teste 4 cobre especificamente o fallback para trials legados sem trialEndsAt
+ * gravado, que continua a assumir 40 dias (a duração vigente quando foram ativados) —
+ * ver comentário em AdvertiserBillingController.
  */
-@DisplayName("Trial da agência — duração de 40 dias (não 14)")
+@DisplayName("Trial da agência — duração de 180 dias (não 14)")
 class AdvertiserTrialDurationIntegrationTest extends IntegrationTestBase {
 
     @Autowired
@@ -66,26 +70,26 @@ class AdvertiserTrialDurationIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("Trial ativado há 20 dias (de 40) continua ativo — antes do fix ficava expirado aos 14")
-    void trialStillActiveAt20DaysOf40() throws Exception {
-        var activatedAt = Instant.now().minus(20, ChronoUnit.DAYS);
-        var endsAt = activatedAt.plus(40, ChronoUnit.DAYS); // como BillingService.activateTrial grava
+    @DisplayName("Trial ativado há 100 dias (de 180) continua ativo — antes do fix ficava expirado aos 14")
+    void trialStillActiveAt100DaysOf180() throws Exception {
+        var activatedAt = Instant.now().minus(100, ChronoUnit.DAYS);
+        var endsAt = activatedAt.plus(180, ChronoUnit.DAYS); // como BillingService.activateTrial grava
         setBillingMetadata(activatedAt, endsAt);
 
         given().cookie("properia_session", generateToken(userId, "agent", true, advertiserId))
             .when().get("/api/advertiser/plan")
             .then().statusCode(200)
             .body("data.trial.isActive", equalTo(true))
-            .body("data.trial.daysRemaining", greaterThanOrEqualTo(19))
-            .body("data.trial.daysRemaining", lessThanOrEqualTo(20))
+            .body("data.trial.daysRemaining", greaterThanOrEqualTo(79))
+            .body("data.trial.daysRemaining", lessThanOrEqualTo(80))
             .body("data.effectivePlanCode", equalTo("business"));
     }
 
     @Test
-    @DisplayName("Trial ativado há 39 dias (de 40) ainda ativo — só expira mesmo aos 40")
-    void trialActiveJustBefore40Days() throws Exception {
-        var activatedAt = Instant.now().minus(39, ChronoUnit.DAYS);
-        var endsAt = activatedAt.plus(40, ChronoUnit.DAYS);
+    @DisplayName("Trial ativado há 179 dias (de 180) ainda ativo — só expira mesmo aos 180")
+    void trialActiveJustBefore180Days() throws Exception {
+        var activatedAt = Instant.now().minus(179, ChronoUnit.DAYS);
+        var endsAt = activatedAt.plus(180, ChronoUnit.DAYS);
         setBillingMetadata(activatedAt, endsAt);
 
         given().cookie("properia_session", generateToken(userId, "agent", true, advertiserId))
@@ -95,10 +99,10 @@ class AdvertiserTrialDurationIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("Trial expira mesmo depois de passados os 40 dias combinados")
-    void trialExpiresAfter40Days() throws Exception {
-        var activatedAt = Instant.now().minus(41, ChronoUnit.DAYS);
-        var endsAt = activatedAt.plus(40, ChronoUnit.DAYS); // já no passado
+    @DisplayName("Trial expira mesmo depois de passados os 180 dias combinados")
+    void trialExpiresAfter180Days() throws Exception {
+        var activatedAt = Instant.now().minus(181, ChronoUnit.DAYS);
+        var endsAt = activatedAt.plus(180, ChronoUnit.DAYS); // já no passado
         setBillingMetadata(activatedAt, endsAt);
 
         given().cookie("properia_session", generateToken(userId, "agent", true, advertiserId))

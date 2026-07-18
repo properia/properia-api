@@ -131,7 +131,7 @@ public class BillingService {
     @Transactional
     public void activateTrial(UUID advertiserId) {
         var now = java.time.Instant.now();
-        var endsAt = now.plus(40, java.time.temporal.ChronoUnit.DAYS);
+        var endsAt = now.plus(180, java.time.temporal.ChronoUnit.DAYS);
         // Ativação atómica e idempotente: plano + metadata num único UPDATE guardado.
         // Se já estava ativo, o UPDATE não afeta linhas → CONFLICT (sem check-then-act).
         var activated = billingRepo.activateTrialOnce(advertiserId, "business", Map.of(
@@ -195,7 +195,7 @@ public class BillingService {
             meta.getOrDefault("paymentStatus", "none").toString(),
             snapshot.creditBalance(),
             meta.containsKey("trialActivatedAt") ? meta.get("trialActivatedAt").toString() : null,
-            // Fonte de verdade da duração do trial: gravado por activateTrial() (40 dias).
+            // Fonte de verdade da duração do trial: gravado por activateTrial() (180 dias).
             // Antes disto não era exposto e o controller recalculava com 14 dias hardcoded,
             // provocando downgrade prematuro de agências ainda dentro do trial combinado.
             meta.containsKey("trialEndsAt") ? meta.get("trialEndsAt").toString() : null,
