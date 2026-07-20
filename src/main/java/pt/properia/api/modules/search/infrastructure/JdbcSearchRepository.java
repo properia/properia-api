@@ -8,6 +8,7 @@ import pt.properia.api.modules.search.application.SearchRepository;
 import pt.properia.api.modules.search.application.dto.ListingSearchItemDto;
 import pt.properia.api.modules.search.application.dto.PriceHistorySnapshotDto;
 import pt.properia.api.modules.search.application.dto.SearchParams;
+import pt.properia.api.modules.search.application.dto.SearchRankingSummaryDto;
 import pt.properia.api.modules.search.application.dto.SearchResultDto;
 
 import java.math.BigDecimal;
@@ -23,6 +24,30 @@ public class JdbcSearchRepository implements SearchRepository {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcSearchRepository.class);
 
+    // ── POI: mapeamento das categorias do parser NL/IA para listing_poi_snapshots ──
+    // 10 categorias têm distância exata (nearest_X_m); praia/cultura/biblioteca só
+    // têm contagem dentro do raio do snapshot (700m) — usamos "presente" como proxy.
+    private static final java.util.Map<String, String> POI_DISTANCE_COLUMN = java.util.Map.ofEntries(
+        java.util.Map.entry("transporte", "nearest_transport_m"),
+        java.util.Map.entry("escola", "nearest_school_m"),
+        java.util.Map.entry("supermercado", "nearest_supermarket_m"),
+        java.util.Map.entry("saude", "nearest_health_m"),
+        java.util.Map.entry("parque", "nearest_park_m"),
+        java.util.Map.entry("ginasio", "nearest_gym_m"),
+        java.util.Map.entry("restaurante", "nearest_restaurant_m"),
+        java.util.Map.entry("cafe", "nearest_cafe_m"),
+        java.util.Map.entry("farmacia", "nearest_pharmacy_m"),
+        java.util.Map.entry("banco", "nearest_bank_m")
+    );
+    private static final java.util.Map<String, String> POI_COUNT_COLUMN = java.util.Map.ofEntries(
+        java.util.Map.entry("praia", "beach_count"),
+        java.util.Map.entry("cultura", "culture_count"),
+        java.util.Map.entry("biblioteca", "culture_count")
+    );
+    // Ritmo de caminhada urbano de referência (~4.8 km/h) para converter minutos → metros.
+    private static final int WALK_METERS_PER_MINUTE = 80;
+    private static final int DEFAULT_ZONE_MAX_MINUTES = 10;
+
     private final JdbcClient jdbc;
 
     public JdbcSearchRepository(JdbcClient jdbc) {
@@ -32,18 +57,24 @@ public class JdbcSearchRepository implements SearchRepository {
     @Override
     public SearchResultDto search(SearchParams params) {
         var where = buildWhere(params);
-        var orderBy = buildOrderBy(params.sort());
+        var sortPlan = buildSortPlan(params);
         int offset = (params.page() - 1) * params.pageSize();
 
-        // Phase 1: lightweight query — only the listings table, no joins, no laterals.
-        // Returns the IDs of the page rows. Uses indexes for ORDER BY + LIMIT efficiently.
-        var idSql = "SELECT l.id::text AS id FROM properia.listings l "
+        // Phase 1: lightweight query — only the listings table, no joins, no laterals,
+        // EXCEPT when the chosen sort needs one (ex.: "value" junta a CTE de comparáveis).
+        // Isso mantém o caminho rápido (sorts simples) exatamente como era.
+        var idSql = (sortPlan.cte().isEmpty() ? "" : "WITH " + sortPlan.cte() + " ")
+            + "SELECT l.id::text AS id FROM properia.listings l "
+            + (sortPlan.fromExtra().isEmpty() ? "" : sortPlan.fromExtra() + " ")
             + where.sql()
-            + " ORDER BY " + orderBy
+            + " ORDER BY " + sortPlan.orderBy()
             + " LIMIT :limit OFFSET :offset";
 
         var idQuery = jdbc.sql(idSql);
         for (var e : where.params().entrySet()) {
+            idQuery = idQuery.param(e.getKey(), e.getValue());
+        }
+        for (var e : sortPlan.params().entrySet()) {
             idQuery = idQuery.param(e.getKey(), e.getValue());
         }
         idQuery = idQuery.param("limit", params.pageSize()).param("offset", offset);
@@ -58,14 +89,16 @@ public class JdbcSearchRepository implements SearchRepository {
             log.info("search sort={} size={} → idQuery={}ms count={}ms items=0",
                 params.sort(), params.pageSize(), (t1 - t0), (t2 - t1));
             int totalPages = (int) Math.ceil((double) total / params.pageSize());
-            return new SearchResultDto(List.of(), total, params.page(), params.pageSize(), totalPages);
+            return new SearchResultDto(List.of(), total, params.page(), params.pageSize(), totalPages,
+                buildRankingSummary(params, sortPlan));
         }
 
         // Phase 2: full detail query for the specific page rows only.
         // IDs are embedded as literals because they come from the DB (safe, no SQL injection risk).
         // This ensures laterals run at most pageSize times regardless of table size.
         var idLiterals = ids.stream().map(id -> "'" + id + "'").collect(java.util.stream.Collectors.joining(","));
-        var detailSql = """
+        var detailCtePrefix = sortPlan.cte().isEmpty() ? "" : "WITH " + sortPlan.cte() + " ";
+        var detailSql = detailCtePrefix + """
             SELECT
               l.id, l.public_id, l.advertiser_id, l.title,
               l.business_type, l.property_type, l.status,
@@ -136,10 +169,16 @@ public class JdbcSearchRepository implements SearchRepository {
                 FROM properia.listing_price_history
                 WHERE listing_id = l.id
             ) ph_agg ON true
-            """ + "WHERE l.id::text IN (" + idLiterals + ")\nORDER BY " + orderBy;
+            """
+            + (sortPlan.fromExtra().isEmpty() ? "" : "\n" + sortPlan.fromExtra() + "\n")
+            + "WHERE l.id::text IN (" + idLiterals + ")\nORDER BY " + sortPlan.orderBy();
 
         long t2 = System.currentTimeMillis();
-        var items = jdbc.sql(detailSql).query((rs, rowNum) -> mapRow(rs)).list();
+        var detailQuery = jdbc.sql(detailSql);
+        for (var e : sortPlan.params().entrySet()) {
+            detailQuery = detailQuery.param(e.getKey(), e.getValue());
+        }
+        var items = detailQuery.query((rs, rowNum) -> mapRow(rs)).list();
         long t3 = System.currentTimeMillis();
 
         long total = count(params);
@@ -149,7 +188,56 @@ public class JdbcSearchRepository implements SearchRepository {
             params.sort(), params.pageSize(), (t1 - t0), (t3 - t2), (t4 - t3), (t4 - t0), items.size());
 
         int totalPages = (int) Math.ceil((double) total / params.pageSize());
-        return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages);
+        return new SearchResultDto(items, total, params.page(), params.pageSize(), totalPages,
+            buildRankingSummary(params, sortPlan));
+    }
+
+    // ── Ranking summary — explica ao utilizador porque esta é a ordem ──────────
+    // Só "semantic" quando o sort realmente usou dados reais (POI suave/comparáveis
+    // de preço); sorts simples (preço/área/recente) ficam em "default" — nada a
+    // explicar, seria ruído.
+
+    private static final java.util.Map<String, String> POI_LABEL_PT = java.util.Map.ofEntries(
+        java.util.Map.entry("transporte", "transportes"), java.util.Map.entry("escola", "escolas"),
+        java.util.Map.entry("supermercado", "supermercado"), java.util.Map.entry("saude", "saúde"),
+        java.util.Map.entry("parque", "parques"), java.util.Map.entry("ginasio", "ginásio"),
+        java.util.Map.entry("restaurante", "restaurantes"), java.util.Map.entry("cafe", "cafés"),
+        java.util.Map.entry("farmacia", "farmácia"), java.util.Map.entry("banco", "banco"),
+        java.util.Map.entry("praia", "praia"), java.util.Map.entry("cultura", "cultura"),
+        java.util.Map.entry("biblioteca", "biblioteca")
+    );
+
+    private SearchRankingSummaryDto buildRankingSummary(SearchParams p, SortPlan plan) {
+        var sort = p.sort() == null ? "recente" : p.sort();
+
+        if ("value".equals(sort)) {
+            return new SearchRankingSummaryDto(
+                "semantic",
+                "Ordenado pela melhor relação preço/m²",
+                "Comparámos o preço por m² de cada imóvel com outros publicados do mesmo tipo, negócio e cidade — os com melhor relação aparecem primeiro.",
+                List.of("Preço/m²", "Comparáveis na mesma cidade"),
+                "Estimativa a partir de anúncios publicados na Properia. Não substitui uma avaliação profissional."
+            );
+        }
+
+        if ("score".equals(sort) && p.softPois() != null && !p.softPois().isEmpty()) {
+            var labels = p.softPois().stream()
+                .map(id -> POI_LABEL_PT.getOrDefault(id, id))
+                .distinct()
+                .toList();
+            if (!labels.isEmpty()) {
+                var labelsText = String.join(", ", labels);
+                return new SearchRankingSummaryDto(
+                    "semantic",
+                    "Ordenado pela proximidade real ao que procuraste",
+                    "Os imóveis mais próximos de " + labelsText + " aparecem primeiro, com base na distância real até esses locais.",
+                    labels.stream().map(l -> l.substring(0, 1).toUpperCase() + l.substring(1)).toList(),
+                    "Distâncias estimadas a partir de dados abertos (OpenStreetMap) — podem não refletir alterações recentes."
+                );
+            }
+        }
+
+        return SearchRankingSummaryDto.defaultMode();
     }
 
     @Override
@@ -415,6 +503,32 @@ public class JdbcSearchRepository implements SearchRepository {
             if (adv.agriculturalUse()) parts.add("l.agricultural_use = true");
         }
 
+        // Pontos de interesse rígidos ("perto de metro", etc.) — antes disto, o
+        // parser detetava a intenção mas o backend ignorava-a por completo (só
+        // afetava chips visuais). Usa a distância real do snapshot mais recente.
+        if (p.hardPois() != null && !p.hardPois().isEmpty()) {
+            int maxMeters = (p.zoneMaxMinutes() != null ? p.zoneMaxMinutes() : DEFAULT_ZONE_MAX_MINUTES)
+                * WALK_METERS_PER_MINUTE;
+            var conditions = new ArrayList<String>();
+            for (var poi : p.hardPois()) {
+                var distCol = POI_DISTANCE_COLUMN.get(poi);
+                var countCol = POI_COUNT_COLUMN.get(poi);
+                if (distCol != null) {
+                    conditions.add("EXISTS (SELECT 1 FROM properia.listing_poi_snapshots ps "
+                        + "WHERE ps.listing_id = l.id AND ps." + distCol + " IS NOT NULL "
+                        + "AND ps." + distCol + " <= :hardPoiMaxMeters)");
+                } else if (countCol != null) {
+                    conditions.add("EXISTS (SELECT 1 FROM properia.listing_poi_snapshots ps "
+                        + "WHERE ps.listing_id = l.id AND ps." + countCol + " > 0)");
+                }
+            }
+            if (!conditions.isEmpty()) {
+                params.put("hardPoiMaxMeters", maxMeters);
+                var joiner = "any".equals(p.hardPoisMode()) ? " OR " : " AND ";
+                parts.add("(" + String.join(joiner, conditions) + ")");
+            }
+        }
+
         // Advertiser filter (agency profile page)
         if (p.advertiserId() != null && !p.advertiserId().isBlank()) {
             parts.add("l.advertiser_id = :advertiserId::uuid");
@@ -434,13 +548,96 @@ public class JdbcSearchRepository implements SearchRepository {
         return new WhereClause(whereClause, params);
     }
 
-    private String buildOrderBy(String sort) {
-        return switch (sort == null ? "recente" : sort) {
-            case "preco_asc" -> "l.price_amount ASC NULLS LAST";
-            case "preco_desc" -> "l.price_amount DESC NULLS LAST";
-            case "area" -> "l.usable_area_m2 DESC NULLS LAST";
-            default -> "l.published_at DESC NULLS LAST, l.created_at DESC";
+    // Plano de ordenação: além da expressão ORDER BY, sorts mais ricos (value/score)
+    // precisam de um CTE (comparáveis de preço) ou de parâmetros extra (POIs suaves).
+    // cte fica vazio para sorts simples — o caminho rápido de sempre não muda.
+    private record SortPlan(String cte, String fromExtra, String orderBy, java.util.Map<String, Object> params) {}
+
+    private static final String FEATURED_BOOST_PREFIX =
+        // Destaque só entra em "recente"/"score" (nunca distorce ordens explícitas
+        // de preço/área/valor — isso quebraria a confiança de quem pediu "mais barato
+        // primeiro"). Rotação diária pelo hash do id: evita que o mesmo anúncio em
+        // destaque fique sempre no topo quando há vários anunciantes com destaque.
+        "CASE WHEN l.is_featured THEN 0 ELSE 1 END ASC, "
+        + "md5(l.id::text || to_char(CURRENT_DATE, 'YYYY-MM-DD')) ASC, ";
+
+    private SortPlan buildSortPlan(SearchParams p) {
+        var sort = p.sort() == null ? "recente" : p.sort();
+
+        var defaultPlan = new SortPlan("", "", FEATURED_BOOST_PREFIX
+            + "l.published_at DESC NULLS LAST, l.created_at DESC", java.util.Map.of());
+
+        return switch (sort) {
+            case "preco_asc" -> new SortPlan("", "", "l.price_amount ASC NULLS LAST", java.util.Map.of());
+            case "preco_desc" -> new SortPlan("", "", "l.price_amount DESC NULLS LAST", java.util.Map.of());
+            case "area" -> new SortPlan("", "", "l.usable_area_m2 DESC NULLS LAST", java.util.Map.of());
+
+            // "Contexto de preço": €/m² deste imóvel vs. a média de imóveis publicados
+            // comparáveis (mesma cidade + tipo + negócio). Melhor relação primeiro.
+            // CTE calcula a média uma vez por combinação, não por linha — barato mesmo
+            // com muitos resultados.
+            case "value" -> new SortPlan(
+                """
+                comparables AS (
+                    SELECT city, property_type, business_type,
+                           AVG(price_amount / NULLIF(usable_area_m2, 0)) AS avg_ppm2
+                    FROM properia.listings
+                    WHERE status = 'published' AND usable_area_m2 > 0 AND price_amount IS NOT NULL
+                    GROUP BY city, property_type, business_type
+                )
+                """,
+                "LEFT JOIN comparables cmp ON cmp.city = l.city "
+                + "AND cmp.property_type = l.property_type AND cmp.business_type = l.business_type",
+                """
+                (
+                    CASE WHEN l.usable_area_m2 > 0 AND l.price_amount IS NOT NULL AND cmp.avg_ppm2 > 0
+                         THEN (l.price_amount / l.usable_area_m2) / cmp.avg_ppm2
+                         ELSE NULL
+                    END
+                ) ASC NULLS LAST, l.published_at DESC
+                """,
+                java.util.Map.of()
+            );
+
+            // "Compatibilidade estimada": relevância pelos POIs suaves da pesquisa
+            // (proximidade real, via listing_poi_snapshots) + um impulso pequeno de
+            // destaque que nunca decide sozinho — um destaque irrelevante não bate um
+            // imóvel muito relevante sem destaque.
+            case "score" -> buildScoreSortPlan(p, defaultPlan);
+
+            default -> defaultPlan;
         };
+    }
+
+    private SortPlan buildScoreSortPlan(SearchParams p, SortPlan fallback) {
+        var softPois = p.softPois();
+        if (softPois == null || softPois.isEmpty()) {
+            // Sem contexto semântico (ninguém escolheu isto por pesquisa/perfil) —
+            // cai para destaque + recência, em vez de um "score" vazio sem sentido.
+            return fallback;
+        }
+
+        int maxMeters = (p.zoneMaxMinutes() != null ? p.zoneMaxMinutes() : DEFAULT_ZONE_MAX_MINUTES)
+            * WALK_METERS_PER_MINUTE;
+
+        var terms = new ArrayList<String>();
+        for (var poi : softPois) {
+            var distCol = POI_DISTANCE_COLUMN.get(poi);
+            if (distCol == null) continue; // praia/cultura/biblioteca: sem distância, não entram no score numérico
+            terms.add("COALESCE((SELECT GREATEST(0, 1 - ps." + distCol + "::float / :scoreMaxMeters) "
+                + "FROM properia.listing_poi_snapshots ps WHERE ps.listing_id = l.id "
+                + "ORDER BY ps.processed_at DESC LIMIT 1), 0)");
+        }
+
+        if (terms.isEmpty()) return fallback;
+
+        var avgProximity = "((" + String.join(" + ", terms) + ") / " + terms.size() + ".0)";
+        var orderBy = "("
+            + avgProximity + " * 0.85"
+            + " + (CASE WHEN l.is_featured THEN 0.15 ELSE 0 END)"
+            + ") DESC, l.published_at DESC";
+
+        return new SortPlan("", "", orderBy, java.util.Map.of("scoreMaxMeters", maxMeters));
     }
 
     // ── Row mapper ─────────────────────────────────────────────────────────────

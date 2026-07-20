@@ -7,5 +7,6 @@ public record SearchResultDto(
     long total,
     int page,
     int pageSize,
-    int totalPages
+    int totalPages,
+    SearchRankingSummaryDto rankingSummary
 ) {}

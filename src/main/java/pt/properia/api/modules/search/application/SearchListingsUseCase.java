@@ -32,7 +32,7 @@ public class SearchListingsUseCase {
 
         if (hasCommuteFilter(params)) {
             var enriched = enrichWithCommute(result.items(), params);
-            return new SearchResultDto(enriched, result.total(), result.page(), result.pageSize(), result.totalPages());
+            return new SearchResultDto(enriched, result.total(), result.page(), result.pageSize(), result.totalPages(), result.rankingSummary());
         }
 
         return result;
