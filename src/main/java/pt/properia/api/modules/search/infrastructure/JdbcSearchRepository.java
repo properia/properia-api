@@ -541,6 +541,44 @@ public class JdbcSearchRepository implements SearchRepository {
             params.put("q", "%" + p.q().toLowerCase().strip() + "%");
         }
 
+        // Filtro de trajeto — restringe a lista a imóveis dentro do tempo pedido.
+        // Determinístico e sem API externa: distância em linha reta (haversine) × velocidade
+        // do modo. Aplica-se ao conjunto inteiro (search e count partilham este WHERE), ao
+        // contrário do enriquecimento por página no SearchListingsUseCase. É "seguro de
+        // calcular" — não depende do ORS. Pré-filtro por caixa (usa índice lat/lng) + círculo
+        // haversine para a precisão. Coordenadas são obrigatórias ao publicar, por isso
+        // filtramos direto por l.latitude/l.longitude (imóvel sem coords fica de fora).
+        if (p.commuteLat() != null && p.commuteLng() != null
+                && p.commuteMaxMinutes() != null && p.commuteMaxMinutes() > 0) {
+            double speedKmh = switch (p.commuteMode() == null ? "" : p.commuteMode()) {
+                case "driving" -> 32.0;
+                case "cycling" -> 16.0;
+                default        -> 4.8;   // walking (default)
+            };
+            // A linha reta subestima a distância por estrada; o enriquecimento do badge
+            // (OpenRouteCommuteService.haversineFallback) aplica um fator de desvio de 1.18
+            // ao tempo. Usamos o MESMO fator aqui para o filtro e o badge concordarem —
+            // senão apareceria um imóvel com badge "17 min" numa pesquisa de "≤15 min".
+            double radiusKm = (p.commuteMaxMinutes() / 60.0) * speedKmh / 1.18;
+            double dLat = radiusKm / 111.0;
+            double dLng = radiusKm / (111.0 * Math.max(0.1, Math.cos(Math.toRadians(p.commuteLat()))));
+            params.put("commuteLat", p.commuteLat());
+            params.put("commuteLng", p.commuteLng());
+            params.put("commuteRadiusKm", radiusKm);
+            params.put("commuteLatMin", p.commuteLat() - dLat);
+            params.put("commuteLatMax", p.commuteLat() + dLat);
+            params.put("commuteLngMin", p.commuteLng() - dLng);
+            params.put("commuteLngMax", p.commuteLng() + dLng);
+            parts.add(
+                "l.latitude IS NOT NULL AND l.longitude IS NOT NULL "
+              + "AND l.latitude BETWEEN :commuteLatMin AND :commuteLatMax "
+              + "AND l.longitude BETWEEN :commuteLngMin AND :commuteLngMax "
+              + "AND (6371 * acos(least(1, greatest(-1, "
+              + "cos(radians(:commuteLat)) * cos(radians(l.latitude)) * "
+              + "cos(radians(l.longitude) - radians(:commuteLng)) + "
+              + "sin(radians(:commuteLat)) * sin(radians(l.latitude)))))) <= :commuteRadiusKm");
+        }
+
         String whereClause = parts.isEmpty()
             ? "WHERE 1=1"
             : "WHERE " + String.join(" AND ", parts);
