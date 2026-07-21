@@ -34,6 +34,10 @@ public record PublicListingDetailDto(
     Integer constructionYear,
     Integer renovationYear,
     String energyRating,
+    // Nº de registo no RNAL (Alojamento Local) — divulgação obrigatória por lei (DL 128/2014)
+    // em qualquer anúncio de arrendamento de curta duração. Só populado quando businessType
+    // == "holiday_rent"; null nos restantes casos.
+    String alRegistrationNumber,
     String sunExposure,
     String city,
     String district,

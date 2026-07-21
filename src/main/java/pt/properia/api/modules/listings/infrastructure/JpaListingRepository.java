@@ -186,7 +186,7 @@ public class JpaListingRepository implements ListingRepository {
             l.getUsableAreaM2(), l.getGrossAreaM2(), l.getLotAreaM2(),
             l.getFloorNumber(), l.getTotalFloors(),
             l.getConstructionYear(), l.getRenovationYear(),
-            l.getEnergyRating(), l.getSunExposure(),
+            l.getEnergyRating(), l.getAlRegistrationNumber(), l.getSunExposure(),
             l.getCity(), l.getDistrict(), l.getParish(), l.getNeighborhood(), l.getPostalCode(),
             l.getLatitude() != null ? l.getLatitude() : (loc != null ? loc.getLatitude() : null),
             l.getLongitude() != null ? l.getLongitude() : (loc != null ? loc.getLongitude() : null),

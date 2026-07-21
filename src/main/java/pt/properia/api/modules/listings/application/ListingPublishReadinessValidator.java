@@ -16,12 +16,13 @@ import java.util.UUID;
  *
  * IMPORTANTE: o wizard de criação (listings-admin-page.tsx, `publishValidation`) já impõe
  * regras muito mais ricas e legalmente específicas — certificado energético (DL 118/2013),
- * caução máxima (Lei 13/2019), RNAL, plausibilidade de preço/m², etc. Este validador NÃO
- * duplica essas regras (ficariam desalinhadas e a divergir com o tempo); é deliberadamente
+ * caução máxima (Lei 13/2019), plausibilidade de preço/m², etc. Este validador NÃO duplica
+ * a maioria dessas regras (ficariam desalinhadas e a divergir com o tempo); é deliberadamente
  * um subconjunto mais fraco — só bloqueia o caso degenerado (anúncio vazio/spam via API
- * direta), nunca mais restritivo do que o que o cliente já validou. As regras legais
- * específicas continuam a viver só no cliente e PODEM ser contornadas por uma chamada
- * direta à API — é um gap conhecido, não resolvido aqui (fora do pedido original).
+ * direta), nunca mais restritivo do que o que o cliente já validou. Essas regras continuam
+ * a viver só no cliente e PODEM ser contornadas por uma chamada direta à API — gap conhecido,
+ * aceite para a maioria dos casos. EXCEÇÃO: o registo RNAL de Alojamento Local é grave
+ * o suficiente (exposição legal) para ter o seu próprio backstop aqui — ver abaixo.
  *
  * Fonte única partilhada entre PublishListingUseCase (POST .../publish) e
  * PatchListingService (PATCH .../listings/{id} com status="published") — os dois
@@ -55,6 +56,14 @@ public class ListingPublishReadinessValidator {
         var description = listing.getDescriptionRaw() != null ? listing.getDescriptionRaw() : listing.getDescriptionShort();
         if (isBlank(description)) {
             missing.add("descrição");
+        }
+        // Alojamento Local é obrigado por lei (DL 128/2014, na redação atual) a exibir o nº
+        // de registo no RNAL em qualquer anúncio — sem ele o anúncio é ilegal. Ao contrário
+        // das outras regras legais "só de cliente" mencionadas no Javadoc desta classe, esta
+        // é suficientemente grave (exposição legal do anunciante e do portal) para justificar
+        // o backstop aqui também.
+        if ("holiday_rent".equals(listing.getBusinessType()) && isBlank(listing.getAlRegistrationNumber())) {
+            missing.add("número de registo RNAL (Alojamento Local)");
         }
         if (countPhotos(listing.getId()) < 1) {
             missing.add("pelo menos uma foto");
