@@ -46,6 +46,12 @@ public class ListingPublishReadinessValidator {
         if (isBlank(listing.getCity()) && isBlank(listing.getDistrict()) && isBlank(listing.getParish())) {
             missing.add("localização (cidade, distrito ou freguesia)");
         }
+        // Coordenadas são obrigatórias: sem elas o anúncio não aparece no mapa nem na pesquisa
+        // por zona/trajeto, e não há dados para a análise de zona. O cliente já resolve isto via
+        // geocoding automático — aqui é só o backstop contra a chamada direta à API.
+        if (listing.getLatitude() == null || listing.getLongitude() == null) {
+            missing.add("localização confirmada no mapa (coordenadas)");
+        }
         var description = listing.getDescriptionRaw() != null ? listing.getDescriptionRaw() : listing.getDescriptionShort();
         if (isBlank(description)) {
             missing.add("descrição");

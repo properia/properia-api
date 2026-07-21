@@ -74,11 +74,16 @@ public class JpaListingRepository implements ListingRepository {
                        l.condition_declared::text, l.furnished_declared::text,
                        COALESCE(l.latitude, loc.latitude)   AS latitude,
                        COALESCE(l.longitude, loc.longitude) AS longitude,
-                       zs.zone_label_primary, zs.zone_summary_short,
+                       zs.zone_label_primary, zs.zone_summary_short, zsnap.status AS zone_processing_status,
                        l.published_at, l.first_published_at, l.created_at
                 FROM properia.listings l
                 LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
                 LEFT JOIN properia.listing_zone_scores zs  ON zs.listing_id  = l.id
+                LEFT JOIN LATERAL (
+                    SELECT status::text AS status FROM properia.listing_zone_snapshots s
+                    WHERE s.listing_id = l.id
+                    ORDER BY s.created_at DESC LIMIT 1
+                ) zsnap ON true
                 WHERE l.advertiser_id = :adv
                   AND l.status::text != 'archived'
                 ORDER BY l.created_at DESC
@@ -115,6 +120,7 @@ public class JpaListingRepository implements ListingRepository {
                 rs.getObject("longitude") != null ? rs.getDouble("longitude") : null,
                 rs.getString("zone_label_primary"),
                 rs.getString("zone_summary_short"),
+                rs.getString("zone_processing_status"),
                 toInstant(rs.getTimestamp("published_at")),
                 toInstant(rs.getTimestamp("first_published_at")),
                 toInstant(rs.getTimestamp("created_at"))
@@ -246,7 +252,7 @@ public class JpaListingRepository implements ListingRepository {
             l.getHeroImageUrl(), l.getDescriptionRaw(), l.getEnergyRating(),
             l.getConditionDeclared(), l.getFurnishedDeclared(),
             l.getLatitude(), l.getLongitude(),
-            null, null,
+            null, null, null,
             l.getPublishedAt(), l.getFirstPublishedAt(), l.getCreatedAt()
         );
     }

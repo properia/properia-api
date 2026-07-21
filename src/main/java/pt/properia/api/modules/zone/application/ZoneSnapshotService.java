@@ -40,12 +40,47 @@ public class ZoneSnapshotService {
     public void processAsync(UUID listingId, double lat, double lng,
                               String street, String neighborhood, String city,
                               String precision) {
+        var jobId = insertJobExecution(listingId);
         try {
             process(listingId, lat, lng, street, neighborhood, city, precision);
+            markJobFinished(jobId, "completed", null);
         } catch (Exception e) {
             log.error("Zone processing failed for listing {}: {}", listingId, e.getMessage(), e);
             markError(listingId, lat, lng, "PROCESSING_FAILED", e.getMessage());
+            markJobFinished(jobId, "failed", e.getMessage());
         }
+    }
+
+    // Regista o job em job_executions para que o estado (queued/running/completed/failed)
+    // fique visível ao FE via GET /api/enrichment/listings/{id}/zone/status (latestJob).
+    private UUID insertJobExecution(UUID listingId) {
+        var id = UUID.randomUUID();
+        try {
+            jdbc.sql("""
+                    INSERT INTO properia.job_executions
+                      (id, job_type, entity_type, entity_id, status, attempts, payload, started_at, created_at, updated_at)
+                    VALUES (:id, 'listing_zone_enrichment', 'listing', :eid, 'running', 1, '{}'::jsonb, now(), now(), now())
+                    """)
+                .param("id", id)
+                .param("eid", listingId)
+                .update();
+        } catch (Exception ignored) {}
+        return id;
+    }
+
+    private void markJobFinished(UUID jobId, String status, String errorMessage) {
+        try {
+            jdbc.sql("""
+                    UPDATE properia.job_executions
+                    SET status = CAST(:status AS properia.job_status), error_message = :err,
+                        finished_at = now(), updated_at = now()
+                    WHERE id = :id
+                    """)
+                .param("id", jobId)
+                .param("status", status)
+                .param("err", errorMessage != null ? errorMessage.substring(0, Math.min(500, errorMessage.length())) : null)
+                .update();
+        } catch (Exception ignored) {}
     }
 
     private void process(UUID listingId, double lat, double lng,

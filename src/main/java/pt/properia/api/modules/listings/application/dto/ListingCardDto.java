@@ -35,6 +35,7 @@ public record ListingCardDto(
     Double longitude,
     String zoneLabelPrimary,
     String zoneSummaryShort,
+    String zoneProcessingStatus,
     Instant publishedAt,
     Instant firstPublishedAt,
     Instant createdAt
