@@ -45,7 +45,8 @@ public interface AuthRepository {
         String name,
         String email,
         String passwordHash,
-        boolean marketingConsent
+        boolean marketingConsent,
+        boolean acceptTerms
     ) {}
 
     record ResolveOAuthIdentityInput(

@@ -29,7 +29,8 @@ public class RegisterLocalUseCase {
         this.emailService = emailService;
     }
 
-    public record Command(String name, String email, String password, boolean marketingConsent) {}
+    public record Command(String name, String email, String password,
+                          boolean marketingConsent, boolean acceptTerms) {}
     public record Result(AuthUserSummaryDto user, boolean requiresEmailVerification) {}
 
     public Result execute(Command command) {
@@ -46,7 +47,8 @@ public class RegisterLocalUseCase {
             command.name().strip(),
             normalizedEmail,
             hash,
-            command.marketingConsent()
+            command.marketingConsent(),
+            command.acceptTerms()
         ));
 
         // Best-effort: a conta já está criada nesta altura, por isso uma falha a enviar

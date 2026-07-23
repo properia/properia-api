@@ -14,7 +14,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
         given()
             .contentType(ContentType.JSON)
             .body("""
-                {"name":"Test User","email":"test@example.com","password":"Password123","marketingConsent":false}
+                {"name":"Test User","email":"test@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":true}
                 """)
         .when()
             .post("/api/auth/register")
@@ -28,7 +28,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
     @Test
     void register_duplicate_email_returns_409() {
         String body = """
-            {"name":"User A","email":"dup@example.com","password":"Password123","marketingConsent":false}
+            {"name":"User A","email":"dup@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":true}
             """;
 
         given().contentType(ContentType.JSON).body(body)
@@ -45,14 +45,14 @@ class AuthIntegrationTest extends IntegrationTestBase {
         // Register first
         given().contentType(ContentType.JSON)
             .body("""
-                {"name":"Login User","email":"login@example.com","password":"Password123","marketingConsent":false}
+                {"name":"Login User","email":"login@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":true}
                 """)
             .post("/api/auth/register").then().statusCode(201);
 
         // Login
         given().contentType(ContentType.JSON)
             .body("""
-                {"email":"login@example.com","password":"Password123"}
+                {"email":"login@example.com","password":"Password1234"}
                 """)
         .when()
             .post("/api/auth/login")
@@ -74,13 +74,13 @@ class AuthIntegrationTest extends IntegrationTestBase {
         // membership real — trocar para um advertiser aleatório deve dar 403.
         given().contentType(ContentType.JSON)
             .body("""
-                {"name":"Switch User","email":"switch@example.com","password":"Password123","marketingConsent":false}
+                {"name":"Switch User","email":"switch@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":true}
                 """)
             .post("/api/auth/register").then().statusCode(201);
 
         var cookie = given().contentType(ContentType.JSON)
             .body("""
-                {"email":"switch@example.com","password":"Password123"}
+                {"email":"switch@example.com","password":"Password1234"}
                 """)
             .post("/api/auth/login")
             .then().statusCode(200)
@@ -100,7 +100,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
     void login_with_wrong_password_returns_401() {
         given().contentType(ContentType.JSON)
             .body("""
-                {"name":"User X","email":"userx@example.com","password":"Password123","marketingConsent":false}
+                {"name":"User X","email":"userx@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":true}
                 """)
             .post("/api/auth/register").then().statusCode(201);
 
@@ -119,7 +119,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
     void login_with_unknown_email_returns_401() {
         given().contentType(ContentType.JSON)
             .body("""
-                {"email":"nobody@example.com","password":"Password123"}
+                {"email":"nobody@example.com","password":"Password1234"}
                 """)
         .when()
             .post("/api/auth/login")
@@ -164,7 +164,21 @@ class AuthIntegrationTest extends IntegrationTestBase {
     void register_with_short_password_returns_400() {
         given().contentType(ContentType.JSON)
             .body("""
-                {"name":"User","email":"u@example.com","password":"short","marketingConsent":false}
+                {"name":"User","email":"u@example.com","password":"short","marketingConsent":false,"acceptTerms":true}
+                """)
+        .when()
+            .post("/api/auth/register")
+        .then()
+            .statusCode(400);
+    }
+
+    @Test
+    void register_without_accepting_terms_returns_400() {
+        // RGPD: sem aceitar explicitamente os Termos/Política de Privacidade não há conta —
+        // antes, um registo via API direta criava conta e gravava consentimento como concedido.
+        given().contentType(ContentType.JSON)
+            .body("""
+                {"name":"No Terms","email":"noterms@example.com","password":"Password1234","marketingConsent":false,"acceptTerms":false}
                 """)
         .when()
             .post("/api/auth/register")

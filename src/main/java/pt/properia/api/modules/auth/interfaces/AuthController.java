@@ -77,7 +77,7 @@ public class AuthController {
     public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest req,
                                        HttpServletResponse response) {
         var result = registerUseCase.execute(new RegisterLocalUseCase.Command(
-            req.name(), req.email(), req.password(), req.marketingConsent()
+            req.name(), req.email(), req.password(), req.marketingConsent(), req.acceptTerms()
         ));
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
             "user", result.user(),

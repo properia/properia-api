@@ -19,7 +19,10 @@ public class PasswordService {
     private static final int SCRYPT_R = 8;
     private static final int SCRYPT_P = 1;
     private static final int KEY_LEN = 64;
-    private static final int MIN_LENGTH = 8;
+    // Alinhado com o formulário de registo do FE (≥12). Frases longas são mais seguras
+    // e fáceis de lembrar. Só se aplica a definir/alterar password (registo, reset) —
+    // nunca ao login, por isso contas antigas com passwords mais curtas continuam a entrar.
+    private static final int MIN_LENGTH = 12;
 
     private final SecureRandom rng = new SecureRandom();
     private final HexFormat hex = HexFormat.of();

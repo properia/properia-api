@@ -61,7 +61,7 @@ public class JpaAuthRepository implements AuthRepository {
     @Override
     public AuthUserSummaryDto createLocalUser(CreateLocalUserInput input) {
         String now = Instant.now().toString();
-        String consents = buildConsentsJson(input.marketingConsent(), now);
+        String consents = buildConsentsJson(input.acceptTerms(), input.marketingConsent(), now);
         String prefs = buildPrefsJson(input.marketingConsent());
 
         var user = users.save(new AppUser(input.email(), input.name(), consents, prefs));
@@ -80,7 +80,8 @@ public class JpaAuthRepository implements AuthRepository {
             .map(identity -> toSummary(users.findById(identity.getUserId()).orElseThrow()))
             .orElseGet(() -> {
                 String now = Instant.now().toString();
-                String consents = buildConsentsJson(false, now);
+                // Login social: aceite dos termos é implícito ao autenticar via provider.
+                String consents = buildConsentsJson(true, false, now);
                 String prefs = buildPrefsJson(false);
 
                 var user = users.save(new AppUser(input.email(), input.name(), consents, prefs));
@@ -162,10 +163,10 @@ public class JpaAuthRepository implements AuthRepository {
             user.getFullName(), user.getRole(), user.getAvatarUrl());
     }
 
-    private String buildConsentsJson(boolean marketing, String now) {
+    private String buildConsentsJson(boolean termsAccepted, boolean marketing, String now) {
         try {
             return json.writeValueAsString(Map.of(
-                "termsPrivacy", Map.of("granted", true, "version", "1.0", "updatedAt", now, "source", "register_local"),
+                "termsPrivacy", Map.of("granted", termsAccepted, "version", "1.0", "updatedAt", now, "source", "register_local"),
                 "marketing", Map.of("granted", marketing, "version", "1.0", "updatedAt", now, "source", "register_local")
             ));
         } catch (Exception e) {
