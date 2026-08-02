@@ -16,6 +16,15 @@ DO $$
 DECLARE
   demo_adv uuid := 'a219b0d2-8a5a-460e-b0dc-3d79bd4793b4';
 BEGIN
+  -- SEGURANÇA: só aplica se a agência de demonstração existir NESTA base de dados.
+  -- Em produção (sem a demo) esta migração é um NO-OP seguro — sem esta guarda, o
+  -- INSERT em buyer_listing_matches com UUIDs fixos violaria a foreign key e faria
+  -- o Flyway/arranque da app rebentar (foi o que aconteceu no deploy de 28/07).
+  IF NOT EXISTS (SELECT 1 FROM properia.advertisers WHERE id = demo_adv) THEN
+    RAISE NOTICE 'V63: agência de demonstração ausente — migração ignorada (no-op).';
+    RETURN;
+  END IF;
+
   -- ─────────────────────────────────────────────────────────────────────
   -- #2 · LEADS SAUDÁVEIS
   -- ─────────────────────────────────────────────────────────────────────
@@ -89,10 +98,12 @@ BEGIN
       ('9e91a443-a424-4c17-8777-3b37eeca6743'::uuid, '5c37267b-344c-44d2-8f3e-c77c1e16d145'::uuid, 71, '["Zona", "Tipo de imóvel", "Quartos"]'),
       ('9e91a443-a424-4c17-8777-3b37eeca6743'::uuid, 'a02f5026-81e1-4663-9d0e-1cd83d613606'::uuid, 66, '["Tipo de imóvel", "Quartos"]')
   ) AS v(buyer_id, listing_id, score, criteria)
-  WHERE NOT EXISTS (
-    SELECT 1 FROM properia.buyer_listing_matches x
-     WHERE x.buyer_profile_id = v.buyer_id AND x.listing_id = v.listing_id
-  );
+  WHERE EXISTS (SELECT 1 FROM properia.buyer_profiles bp WHERE bp.id = v.buyer_id)
+    AND EXISTS (SELECT 1 FROM properia.listings l WHERE l.id = v.listing_id)
+    AND NOT EXISTS (
+      SELECT 1 FROM properia.buyer_listing_matches x
+       WHERE x.buyer_profile_id = v.buyer_id AND x.listing_id = v.listing_id
+    );
 
   RAISE NOTICE 'V63 demo refresh aplicado ao advertiser %', demo_adv;
 END $$;
