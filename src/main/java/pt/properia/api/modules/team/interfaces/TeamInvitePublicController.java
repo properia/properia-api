@@ -8,6 +8,7 @@ import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,17 +35,17 @@ public class TeamInvitePublicController {
             .param("token", token)
             .query((rs, n) -> {
                 var expiresAt = rs.getTimestamp("expires_at");
-                return Map.of(
-                    "id", rs.getString("id"),
-                    "advertiserId", rs.getString("advertiser_id"),
-                    "email", rs.getString("email"),
-                    "membershipRole", rs.getString("membership_role"),
-                    "acceptedAt", rs.getTimestamp("accepted_at") != null
-                        ? rs.getTimestamp("accepted_at").toInstant().toString() : (Object) null,
-                    "expiresAt", expiresAt != null ? expiresAt.toInstant().toString() : (Object) null,
-                    "advertiserName", Optional.ofNullable(rs.getString("brand_name")).orElse("Anunciante"),
-                    "expired", expiresAt != null && expiresAt.toInstant().isBefore(Instant.now())
-                );
+                var accepted = rs.getTimestamp("accepted_at");
+                var row = new HashMap<String, Object>();
+                row.put("id", rs.getString("id"));
+                row.put("advertiserId", rs.getString("advertiser_id"));
+                row.put("email", rs.getString("email"));
+                row.put("membershipRole", rs.getString("membership_role"));
+                row.put("acceptedAt", accepted != null ? accepted.toInstant().toString() : null);
+                row.put("expiresAt", expiresAt != null ? expiresAt.toInstant().toString() : null);
+                row.put("advertiserName", Optional.ofNullable(rs.getString("brand_name")).orElse("Anunciante"));
+                row.put("expired", expiresAt != null && expiresAt.toInstant().isBefore(Instant.now()));
+                return row;
             })
             .optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Convite não encontrado ou inválido.", 404));
@@ -63,14 +64,16 @@ public class TeamInvitePublicController {
                 WHERE token = :token
                 """)
             .param("token", token)
-            .query((rs, n) -> Map.of(
-                "id", rs.getString("id"),
-                "advertiserId", rs.getString("advertiser_id"),
-                "email", rs.getString("email"),
-                "membershipRole", rs.getString("membership_role"),
-                "acceptedAt", (Object) rs.getTimestamp("accepted_at"),
-                "expiresAt", (Object) rs.getTimestamp("expires_at")
-            ))
+            .query((rs, n) -> {
+                var row = new HashMap<String, Object>();
+                row.put("id", rs.getString("id"));
+                row.put("advertiserId", rs.getString("advertiser_id"));
+                row.put("email", rs.getString("email"));
+                row.put("membershipRole", rs.getString("membership_role"));
+                row.put("acceptedAt", rs.getTimestamp("accepted_at"));
+                row.put("expiresAt", rs.getTimestamp("expires_at"));
+                return row;
+            })
             .optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Convite não encontrado ou inválido.", 404));
 
