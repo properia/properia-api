@@ -170,7 +170,13 @@ public class AuthEmailService {
     }
 
     private void send(String to, String subject, String htmlBody, String textBody) {
-        if (resendEnabled) {
+        // Use SMTP for test emails (fictional domains like @properia.pt)
+        // Use RESEND for real emails (actual customer domains)
+        boolean isTestEmail = to.endsWith("@properia.pt");
+
+        if (isTestEmail) {
+            sendViaSMTP(to, subject, htmlBody, textBody);
+        } else if (resendEnabled) {
             sendViaResend(to, subject, htmlBody, textBody);
         } else {
             sendViaSMTP(to, subject, htmlBody, textBody);
