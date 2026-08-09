@@ -178,7 +178,7 @@ public class TeamService {
             .optional()
             .orElse("—");
 
-        var agencyName = jdbc.sql("SELECT name FROM properia.advertisers WHERE id = :id")
+        var agencyName = jdbc.sql("SELECT COALESCE(brand_name, legal_name) FROM properia.advertisers WHERE id = :id")
             .param("id", advertiserId)
             .query(String.class)
             .optional()
@@ -250,7 +250,7 @@ public class TeamService {
             .optional()
             .orElse("—");
 
-        var agencyName = jdbc.sql("SELECT name FROM properia.advertisers WHERE id = :id")
+        var agencyName = jdbc.sql("SELECT COALESCE(brand_name, legal_name) FROM properia.advertisers WHERE id = :id")
             .param("id", advertiserId)
             .query(String.class)
             .optional()
