@@ -55,7 +55,7 @@ public class AdvertiserListingController {
             @Valid @RequestBody CreateListingRequest req) {
         var advertiserId = resolveAdvertiserId(claims);
         var listing = createListingUseCase.execute(new CreateListingUseCase.Command(
-            advertiserId, claims.userId(),
+            advertiserId, claims.userId(), req.assignedAgentId(),
             req.businessType(), req.propertyType(), req.propertySubtype(),
             req.title(), req.descriptionRaw(), req.descriptionShort(),
             req.priceAmount(),
@@ -84,6 +84,7 @@ public class AdvertiserListingController {
             "publicId", listing.getPublicId(),
             "status", listing.getStatus(),
             "advertiserId", listing.getAdvertiserId(),
+            "assignedAgentId", listing.getOwnerUserId(),
             "title", listing.getTitle(),
             "businessType", listing.getBusinessType(),
             "propertyType", listing.getPropertyType()

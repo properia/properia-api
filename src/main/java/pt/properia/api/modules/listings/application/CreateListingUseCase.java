@@ -8,11 +8,15 @@ import pt.properia.api.shared.domain.DomainException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @Transactional
 public class CreateListingUseCase {
+
+    private static final Set<String> ROLES_ALLOWED_TO_REASSIGN = Set.of("owner", "admin");
+    private static final Set<String> ROLES_ELIGIBLE_AS_ASSIGNEE = Set.of("owner", "admin", "sales");
 
     private final ListingRepository repository;
     private final JdbcClient jdbc;
@@ -24,7 +28,8 @@ public class CreateListingUseCase {
 
     public record Command(
         UUID advertiserId,
-        UUID ownerUserId,
+        UUID requestorUserId,
+        UUID assignedAgentId,
         String businessType,
         String propertyType,
         String propertySubtype,
@@ -94,7 +99,7 @@ public class CreateListingUseCase {
         var listing = new Listing();
         listing.setPublicId(generatePublicId());
         listing.setAdvertiserId(cmd.advertiserId());
-        listing.setOwnerUserId(cmd.ownerUserId());
+        listing.setOwnerUserId(resolveOwnerUserId(cmd));
         listing.setBusinessType(cmd.businessType());
         listing.setPropertyType(cmd.propertyType());
         listing.setPropertySubtype(cmd.propertySubtype());
@@ -245,6 +250,37 @@ public class CreateListingUseCase {
         }
 
         return saved;
+    }
+
+    // Espelha a regra de RBAC de PatchListingService.patch() (bloco "Agent assignment") para
+    // que criar-e-atribuir-a-outro-consultor num único pedido siga a mesma política que a
+    // reatribuição pós-criação — em vez de o campo ser silenciosamente ignorado.
+    private UUID resolveOwnerUserId(Command cmd) {
+        if (cmd.assignedAgentId() == null || cmd.assignedAgentId().equals(cmd.requestorUserId())) {
+            return cmd.requestorUserId();
+        }
+
+        var requestorRole = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", cmd.advertiserId()).param("uid", cmd.requestorUserId())
+            .query(String.class).optional()
+            .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão para atribuir este anúncio.", 403));
+        if (!ROLES_ALLOWED_TO_REASSIGN.contains(requestorRole)) {
+            throw new DomainException("FORBIDDEN", "Apenas owner ou admin podem atribuir o anúncio a outro consultor.", 403);
+        }
+
+        var assigneeRole = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", cmd.advertiserId()).param("uid", cmd.assignedAgentId())
+            .query(String.class).optional()
+            .orElseThrow(() -> new DomainException("VALIDATION_ERROR", "O consultor indicado não pertence a esta agência.", 400));
+        if (!ROLES_ELIGIBLE_AS_ASSIGNEE.contains(assigneeRole)) {
+            throw new DomainException("VALIDATION_ERROR", "O consultor indicado não é elegível para ser responsável por anúncios.", 400);
+        }
+
+        return cmd.assignedAgentId();
     }
 
     private String generatePublicId() {

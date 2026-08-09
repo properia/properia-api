@@ -4,11 +4,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public record CreateListingRequest(
     @NotNull String businessType,
     @NotNull String propertyType,
     String propertySubtype,
+    UUID assignedAgentId,
     @NotBlank String title,
     String descriptionRaw,
     String descriptionShort,

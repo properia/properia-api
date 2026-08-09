@@ -154,7 +154,7 @@ public class ListingImportService {
 
             try {
                 var listing = createListing.execute(new CreateListingUseCase.Command(
-                    advertiserId, ownerUserId, n.businessType(), n.propertyType(), null,
+                    advertiserId, ownerUserId, null, n.businessType(), n.propertyType(), null,
                     n.title(), n.description(), null, n.price(),
                     n.bedrooms(), n.bathrooms(), null, n.garageSpaces(), n.parkingSpaces(),
                     n.usableAreaM2(), n.grossAreaM2(), n.lotAreaM2(), null, null, null, null,
