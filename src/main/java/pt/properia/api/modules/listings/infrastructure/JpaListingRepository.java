@@ -64,7 +64,7 @@ public class JpaListingRepository implements ListingRepository {
     @Override
     public List<ListingCardDto> findByAdvertiserId(UUID advertiserId) {
         return jdbc.sql("""
-                SELECT l.id, l.public_id, l.advertiser_id, l.status::text, l.business_type::text,
+                SELECT l.id, l.public_id, l.advertiser_id, l.owner_user_id, l.status::text, l.business_type::text,
                        l.property_type::text, l.title, l.price_amount, l.price_currency,
                        l.bedrooms, l.bathrooms, l.suites, l.usable_area_m2, l.gross_area_m2,
                        l.city, l.district, COALESCE(loc.municipality, '') AS municipality,
@@ -93,6 +93,7 @@ public class JpaListingRepository implements ListingRepository {
                 rs.getObject("id", java.util.UUID.class),
                 rs.getString("public_id"),
                 rs.getObject("advertiser_id", java.util.UUID.class),
+                rs.getObject("owner_user_id", java.util.UUID.class),
                 rs.getString("status"),
                 rs.getString("business_type"),
                 rs.getString("property_type"),
@@ -243,7 +244,7 @@ public class JpaListingRepository implements ListingRepository {
 
     private ListingCardDto toCardDto(Listing l) {
         return new ListingCardDto(
-            l.getId(), l.getPublicId(), l.getAdvertiserId(), l.getStatus(),
+            l.getId(), l.getPublicId(), l.getAdvertiserId(), l.getOwnerUserId(), l.getStatus(),
             l.getBusinessType(), l.getPropertyType(), l.getTitle(),
             l.getPriceAmount(), l.getPriceCurrency(),
             l.getBedrooms(), l.getBathrooms(), l.getSuites(),

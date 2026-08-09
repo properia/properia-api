@@ -8,6 +8,7 @@ public record ListingCardDto(
     UUID id,
     String publicId,
     UUID advertiserId,
+    UUID assignedAgentId,
     String status,
     String businessType,
     String propertyType,
