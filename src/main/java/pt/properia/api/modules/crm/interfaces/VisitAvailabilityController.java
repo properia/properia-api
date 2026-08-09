@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.advertiser.application.UserCalendarSyncService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -25,9 +26,11 @@ public class VisitAvailabilityController {
         {"jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"};
 
     private final JdbcClient jdbc;
+    private final UserCalendarSyncService userCalendarSync;
 
-    public VisitAvailabilityController(JdbcClient jdbc) {
+    public VisitAvailabilityController(JdbcClient jdbc, UserCalendarSyncService userCalendarSync) {
         this.jdbc = jdbc;
+        this.userCalendarSync = userCalendarSync;
     }
 
     // ── Buyer: get available slots for a listing ──────────────────────────────
@@ -39,7 +42,7 @@ public class VisitAvailabilityController {
 
         // Load listing info
         var listingOpt = jdbc.sql("""
-                SELECT li.id, li.advertiser_id,
+                SELECT li.id, li.advertiser_id, li.owner_user_id,
                        COALESCE(lc.visit_booking_enabled, true)  AS visit_booking_enabled,
                        COALESCE(lc.online_visit_available, false) AS online_visit_available
                 FROM properia.listings li
@@ -49,6 +52,7 @@ public class VisitAvailabilityController {
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("advertiserId", rs.getString("advertiser_id"));
+                m.put("ownerUserId", rs.getString("owner_user_id"));
                 m.put("visitBookingEnabled", rs.getBoolean("visit_booking_enabled"));
                 m.put("onlineVisitAvailable", rs.getBoolean("online_visit_available"));
                 return m;
@@ -60,6 +64,7 @@ public class VisitAvailabilityController {
 
         var listing = listingOpt.get();
         var advertiserId = UUID.fromString(listing.get("advertiserId").toString());
+        var ownerUserId = listing.get("ownerUserId") != null ? UUID.fromString(listing.get("ownerUserId").toString()) : null;
         boolean visitBookingEnabled = Boolean.TRUE.equals(listing.get("visitBookingEnabled"));
         boolean onlineVisitAvailable = Boolean.TRUE.equals(listing.get("onlineVisitAvailable"));
 
@@ -172,6 +177,13 @@ public class VisitAvailabilityController {
 
         var bookedSet = new HashSet<>(bookedSlots);
 
+        // Consultor responsável pelo imóvel: se tiver a agenda pessoal Google ligada, os
+        // horários em que está ocupado (reuniões, outras visitas, vida pessoal) também ficam
+        // de fora — sem isto, o comprador podia marcar uma hora que o consultor nunca vai
+        // conseguir cumprir, mesmo respeitando as regras/bloqueios definidos no Properia.
+        // Falha silenciosa (lista vazia) se não estiver ligado — nunca bloqueia a reserva.
+        var consultantBusy = userCalendarSync.getBusyIntervals(ownerUserId, now.toInstant(), rangeEnd.atStartOfDay(zone).toInstant());
+
         // Generate slots
         var days = new ArrayList<Map<String, Object>>();
         DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm");
@@ -195,7 +207,8 @@ public class VisitAvailabilityController {
 
                 boolean ok = !slotStart.isBefore(earliest)
                     && !isBlocked(slotStart, slotEnd, blocks)
-                    && !bookedSet.contains(slotStart);
+                    && !bookedSet.contains(slotStart)
+                    && !isBusyInGoogleCalendar(slotStart, slotEnd, consultantBusy);
 
                 if (ok) {
                     var slot = new LinkedHashMap<String, Object>();
@@ -399,6 +412,17 @@ public class VisitAvailabilityController {
             var block = (Map<String, Object>) rawBlock;
             Instant bStart = (Instant) block.get("startsAt");
             Instant bEnd = (Instant) block.get("endsAt");
+            if (slotStart.isBefore(bEnd) && slotEnd.isAfter(bStart)) return true;
+        }
+        return false;
+    }
+
+    private boolean isBusyInGoogleCalendar(
+            Instant slotStart, Instant slotEnd,
+            List<pt.properia.api.modules.advertiser.application.CalendarProviderClient.BusyInterval> busy) {
+        for (var interval : busy) {
+            var bStart = Instant.parse(interval.start());
+            var bEnd = Instant.parse(interval.end());
             if (slotStart.isBefore(bEnd) && slotEnd.isAfter(bStart)) return true;
         }
         return false;

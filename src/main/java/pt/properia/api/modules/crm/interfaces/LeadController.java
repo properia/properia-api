@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -387,6 +388,24 @@ public class LeadController {
                 createdEvent.put("createdAt", it.get("createdAt"));
                 timeline.add(createdEvent);
                 timeline.addAll(responseTimelineByLead.getOrDefault(leadId, List.of()));
+
+                // Eventos gravados em metadata.events (ex: stage_changed via UpdateLeadStageUseCase)
+                @SuppressWarnings("unchecked")
+                var itMeta = (Map<String, Object>) it.get("metadata");
+                if (itMeta.get("events") instanceof List<?> events) {
+                    for (var raw : events) {
+                        if (!(raw instanceof Map<?, ?> evMap)) continue;
+                        var entry = new LinkedHashMap<String, Object>();
+                        entry.put("id", evMap.get("id"));
+                        entry.put("type", evMap.get("type"));
+                        entry.put("title", evMap.get("title"));
+                        entry.put("description", evMap.get("description"));
+                        entry.put("createdAt", evMap.get("createdAt"));
+                        timeline.add(entry);
+                    }
+                }
+                timeline.sort(Comparator.comparing(e -> (String) e.get("createdAt")));
+
                 it.put("timeline", timeline);
             }
         }
@@ -409,6 +428,8 @@ public class LeadController {
             @RequestBody Map<String, Object> body) {
 
         var advertiserId = requireAdvertiserId(claims);
+        requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
+
         var stage = (String) body.get("stage");
         var assignedToRaw = body.get("assignedTo");
         UUID assignedTo = assignedToRaw != null ? UUID.fromString(assignedToRaw.toString()) : null;
@@ -427,6 +448,13 @@ public class LeadController {
 
         var advertiserId = requireAdvertiserId(claims);
         boolean stageOrCloseReasonHandled = false;
+
+        // Reatribuir ou mudar de etapa um lead de outro consultor exige owner/admin —
+        // ver requireCanModifyAssignmentOrStage. Notas, proposta e dados de contacto
+        // continuam abertos a toda a equipa (não é isso que este gate protege).
+        if (body.containsKey("stage") || body.containsKey("assignedToUserId")) {
+            requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
+        }
 
         // Mudança de etapa e/ou motivo de desfecho passam pelo use case, que aplica
         // as guardas de transição (estados terminais) e a obrigatoriedade do motivo.
@@ -595,6 +623,36 @@ public class LeadController {
             case "meeting" -> "Reunião realizada";
             default -> "Resposta registada";
         };
+    }
+
+    private static final java.util.Set<String> ROLES_ALLOWED_TO_MODIFY_ANY_LEAD = java.util.Set.of("owner", "admin");
+
+    /**
+     * Reatribuir ou mudar o estágio de um lead alheio exige owner/admin. Um membro
+     * sales/editor/viewer só pode fazê-lo em leads que já lhe estão atribuídos (ou
+     * ainda por atribuir — bloquear isso impediria qualquer consultor de "pegar" num
+     * lead novo). Mesma UI já restringia isto (advertiser-leads-page.tsx); faltava
+     * a validação aqui, no servidor.
+     */
+    private void requireCanModifyAssignmentOrStage(UUID advertiserId, UUID requestorUserId, UUID leadId) {
+        var requestorRole = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(String.class).optional()
+            .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão para este lead.", 403));
+
+        if (ROLES_ALLOWED_TO_MODIFY_ANY_LEAD.contains(requestorRole)) return;
+
+        var assignedTo = jdbc.sql("SELECT assigned_to FROM properia.leads WHERE id = :id AND advertiser_id = :adv")
+            .param("id", leadId).param("adv", advertiserId)
+            .query(UUID.class).optional()
+            .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
+
+        if (assignedTo != null && !assignedTo.equals(requestorUserId)) {
+            throw new DomainException("FORBIDDEN",
+                "Este lead está atribuído a outro consultor. Só owner ou admin podem reatribuí-lo ou mudar o seu estágio.", 403);
+        }
     }
 
     private UUID requireAdvertiserId(JwtClaims claims) {

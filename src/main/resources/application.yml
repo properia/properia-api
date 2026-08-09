@@ -199,4 +199,14 @@ properia:
       client-id: ${GOOGLE_CALENDAR_CLIENT_ID:}
       client-secret: ${GOOGLE_CALENDAR_CLIENT_SECRET:}
       redirect-uri: ${GOOGLE_CALENDAR_REDIRECT_URI:http://localhost:8080/api/advertiser/calendar/google/callback}
+      user-redirect-uri: ${GOOGLE_CALENDAR_USER_REDIRECT_URI:http://localhost:8080/api/advertiser/team/me/calendar/google/callback}
       token-encryption-key: ${GOOGLE_CALENDAR_TOKEN_KEY:}
+
+  microsoft:
+    calendar:
+      client-id: ${MICROSOFT_CALENDAR_CLIENT_ID:}
+      client-secret: ${MICROSOFT_CALENDAR_CLIENT_SECRET:}
+      user-redirect-uri: ${MICROSOFT_CALENDAR_USER_REDIRECT_URI:http://localhost:8080/api/advertiser/team/me/calendar/microsoft/callback}
+      # Pode ser a mesma chave do Google (GOOGLE_CALENDAR_TOKEN_KEY) — a cifra não tem noção de
+      # provider, só precisa de 32 bytes base64. Dedicada aqui só por clareza operacional.
+      token-encryption-key: ${MICROSOFT_CALENDAR_TOKEN_KEY:}

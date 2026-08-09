@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.auth.infrastructure.AuthEmailService;
 import pt.properia.api.modules.advertiser.application.GoogleCalendarService;
+import pt.properia.api.modules.advertiser.application.UserCalendarSyncService;
 import pt.properia.api.modules.crm.application.lead.LeadStageAdvancer;
 import pt.properia.api.modules.crm.application.visit.*;
 import pt.properia.api.modules.crm.interfaces.request.RequestVisitRequest;
@@ -38,6 +39,7 @@ public class VisitController {
     private final AuthEmailService emailService;
     private final GoogleCalendarService calendarService;
     private final LeadStageAdvancer leadStageAdvancer;
+    private final UserCalendarSyncService userCalendarSync;
 
     public VisitController(
             RequestVisitUseCase requestVisit,
@@ -46,7 +48,8 @@ public class VisitController {
             JdbcClient jdbc,
             AuthEmailService emailService,
             GoogleCalendarService calendarService,
-            LeadStageAdvancer leadStageAdvancer) {
+            LeadStageAdvancer leadStageAdvancer,
+            UserCalendarSyncService userCalendarSync) {
         this.requestVisit     = requestVisit;
         this.updateVisitStatus = updateVisitStatus;
         this.getVisits        = getVisits;
@@ -54,6 +57,7 @@ public class VisitController {
         this.emailService     = emailService;
         this.calendarService  = calendarService;
         this.leadStageAdvancer = leadStageAdvancer;
+        this.userCalendarSync = userCalendarSync;
     }
 
     // ── Buyer: request a visit ──────────────────────────────────────────────
@@ -303,7 +307,9 @@ public class VisitController {
             @RequestParam(required = false) String dateFrom,
             @RequestParam(required = false) String dateTo,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize) {
+            @RequestParam(defaultValue = "20") int pageSize,
+            @RequestParam(required = false) String assignedToUserId,
+            @RequestParam(required = false) String listingAssignedToUserId) {
         var advertiserId = requireAdvertiserId(claims);
 
         var whereParts = new java.util.ArrayList<String>();
@@ -326,6 +332,18 @@ public class VisitController {
         if (dateTo != null && !dateTo.isBlank()) {
             whereParts.add("v.starts_at <= :dateTo::timestamptz");
             params.put("dateTo", dateTo);
+        }
+        // A visita em si não tem consultor atribuído — herda-se do lead (quem está a
+        // trabalhar o contacto) ou do imóvel (quem angariou/é responsável por ele).
+        // São filtros distintos e não mutuamente exclusivos (mesmo padrão de
+        // ListAdvertiserVisitsParams no FE: assignedToUserId vs listingAssignedToUserId).
+        if (assignedToUserId != null && !assignedToUserId.isBlank()) {
+            whereParts.add("l.assigned_to = :assignedTo::uuid");
+            params.put("assignedTo", assignedToUserId);
+        }
+        if (listingAssignedToUserId != null && !listingAssignedToUserId.isBlank()) {
+            whereParts.add("li.owner_user_id = :listingAssignedTo::uuid");
+            params.put("listingAssignedTo", listingAssignedToUserId);
         }
 
         var whereClause = "WHERE " + String.join(" AND ", whereParts);
@@ -424,6 +442,7 @@ public class VisitController {
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(
             id, advertiserId, body.get("status"), body.get("meetingUrl")
         ));
+        syncConsultantCalendarForStatus(id, body.get("status"));
         return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
     }
 
@@ -443,10 +462,27 @@ public class VisitController {
         }
 
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(id, advertiserId, "confirmed", meetingUrl));
+        // Insere/atualiza a visita na agenda PESSOAL do consultor atribuído (se tiver ligado a
+        // sua conta Google) — best-effort, nunca falha a confirmação da visita.
+        userCalendarSync.syncVisitToConsultantCalendar(id);
         var response = new java.util.LinkedHashMap<String, Object>();
         response.put("confirmed", true);
         if (meetingUrl != null) response.put("meetingUrl", meetingUrl);
         return ResponseEntity.ok(Map.of("data", response));
+    }
+
+    /**
+     * Espelha a mudança de estado na agenda pessoal do consultor: 'confirmed' sincroniza (cria
+     * ou atualiza o evento); um estado terminal que não seja 'completed' remove o evento — a
+     * visita deixou de acontecer, não faz sentido continuar na agenda do consultor. 'completed'
+     * mantém o evento como registo histórico do que já aconteceu.
+     */
+    private void syncConsultantCalendarForStatus(UUID visitId, String status) {
+        if ("confirmed".equals(status)) {
+            userCalendarSync.syncVisitToConsultantCalendar(visitId);
+        } else if ("cancelled".equals(status) || "no_show".equals(status) || "expired".equals(status)) {
+            userCalendarSync.removeVisitFromConsultantCalendar(visitId);
+        }
     }
 
     /**
@@ -658,6 +694,7 @@ public class VisitController {
 
         if (status != null) {
             updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(id, advertiserId, status, meetingUrl));
+            syncConsultantCalendarForStatus(id, status);
         } else if (meetingUrl != null) {
             jdbc.sql("UPDATE properia.visits SET meeting_url = :url, updated_at = now() WHERE id = :id AND advertiser_id = :adv")
                 .param("url", meetingUrl).param("id", id).param("adv", advertiserId).update();
@@ -677,6 +714,10 @@ public class VisitController {
                     WHERE id = :id AND advertiser_id = :adv
                     """)
                 .param("v", Timestamp.from(newStartsAt)).param("id", id).param("adv", advertiserId).update();
+
+            // Reagendamento de uma visita já confirmada: atualiza a hora no evento já criado
+            // na agenda pessoal do consultor (não cria um evento novo — reaproveita o id existente).
+            userCalendarSync.syncVisitToConsultantCalendar(id);
         }
         if (body.containsKey("endsAt") && body.get("endsAt") != null) {
             var endsAt = Instant.parse((String) body.get("endsAt"));

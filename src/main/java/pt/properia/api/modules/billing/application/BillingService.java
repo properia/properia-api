@@ -28,17 +28,89 @@ public class BillingService {
         this.billingRepo = billingRepo;
     }
 
+    // ── Credit packs ──────────────────────────────────────────────────────────
+    // Fonte única de verdade no backend — tem de espelhar shared/billing-catalog.ts no FE.
+    // O catálogo duplicado no controller (antes desta correção) foi a causa de o packCode
+    // nunca ter sido validado consistentemente com o que o checkout realmente cobrava.
+
+    public record CreditPack(String code, int credits, int priceEur) {}
+
+    private static final Map<String, CreditPack> CREDIT_PACKS = Map.of(
+        "basic",        new CreditPack("basic", 5, 15),
+        "standard",     new CreditPack("standard", 15, 39),
+        "professional", new CreditPack("professional", 40, 89)
+    );
+
+    public CreditPack resolveCreditPack(String packCode) {
+        var pack = CREDIT_PACKS.get(packCode);
+        if (pack == null) {
+            throw new DomainException("BAD_REQUEST", "Pack de créditos inválido.", 400);
+        }
+        return pack;
+    }
+
     // ── Checkout ──────────────────────────────────────────────────────────────
 
     public record CheckoutResult(String url) {}
 
     public CheckoutResult createCreditCheckout(UUID advertiserId, String packCode, String returnUrl) {
+        var pack = resolveCreditPack(packCode);
+
         if (stripeProps.isFake()) {
-            return new CheckoutResult(returnUrl + "?checkout=fake&credits=" + packCode);
+            // Sem Stripe real para dar idempotência ao "retorno", guardamos a intenção agora
+            // e o frontend resgata-a uma só vez em POST /credits/confirm-fake ao voltar.
+            var sessionId = billingRepo.createFakeCheckoutSession(advertiserId, pack.code(), pack.credits());
+            return new CheckoutResult(returnUrl + "?checkout=fake&session=" + sessionId + "&credits=" + pack.code());
         }
-        // TODO: wire Stripe Payment Link or one-time Price ID per pack when going live
-        throw new pt.properia.api.shared.domain.DomainException(
-            "NOT_IMPLEMENTED", "Compra de créditos via Stripe ainda não configurada.", 501);
+
+        Stripe.apiKey = stripeProps.getSecretKey();
+        try {
+            var customerId = getOrCreateStripeCustomer(advertiserId);
+
+            var params = SessionCreateParams.builder()
+                .setMode(SessionCreateParams.Mode.PAYMENT)
+                .setCustomer(customerId)
+                .addLineItem(SessionCreateParams.LineItem.builder()
+                    .setQuantity(1L)
+                    .setPriceData(SessionCreateParams.LineItem.PriceData.builder()
+                        .setCurrency("eur")
+                        .setUnitAmount((long) pack.priceEur() * 100)
+                        .setProductData(SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                            .setName(pack.credits() + " créditos Properia — pack " + pack.code())
+                            .build())
+                        .build())
+                    .build())
+                .setSuccessUrl(returnUrl + "?checkout=success&credits=" + pack.code())
+                .setCancelUrl(returnUrl + "?checkout=cancelled")
+                .putMetadata("advertiserId", advertiserId.toString())
+                .putMetadata("creditPackCode", pack.code())
+                .putMetadata("creditAmount", String.valueOf(pack.credits()))
+                .build();
+
+            var session = Session.create(params);
+            return new CheckoutResult(session.getUrl());
+
+        } catch (Exception e) {
+            throw new DomainException("BILLING_ERROR", "Não foi possível criar a sessão de checkout.", 502);
+        }
+    }
+
+    /**
+     * Resgata uma sessão de checkout "fake" (modo dev) UMA só vez e credita o saldo.
+     * Chamado pelo frontend ao detetar ?checkout=fake&session=... no retorno. Idempotente:
+     * se a sessão já tiver sido resgatada (ex.: refresh da página), devolve o saldo atual
+     * sem creditar de novo.
+     */
+    @Transactional
+    public int confirmFakeCreditCheckout(UUID advertiserId, UUID sessionId) {
+        var claimed = billingRepo.claimFakeCheckoutSession(sessionId, advertiserId);
+        if (claimed.isEmpty()) {
+            return billingRepo.getCreditBalance(advertiserId);
+        }
+        var newBalance = billingRepo.addCredits(advertiserId, claimed.get().credits());
+        billingRepo.addCreditTransaction(advertiserId, "purchase", claimed.get().credits(), newBalance,
+            sessionId.toString(), "Compra de créditos — pack " + claimed.get().packCode() + " (dev/fake)");
+        return newBalance;
     }
 
     public CheckoutResult createCheckout(UUID advertiserId, String planCode, String billingCycle, String returnUrl) {
@@ -225,8 +297,20 @@ public class BillingService {
             var session = (Session) event.getDataObjectDeserializer()
                 .getObject().orElseThrow();
             var advertiserId = UUID.fromString(session.getMetadata().get("advertiserId"));
-            var planCode = session.getMetadata().get("targetPlanCode");
+            var creditPackCode = session.getMetadata().get("creditPackCode");
 
+            // Compra de créditos (modo "payment", one-off) é um ramo distinto de subscrição
+            // de plano (modo "subscription") — o event.id já garante que só entra aqui uma
+            // vez (dedup em handleWebhook), por isso um incremento simples é seguro.
+            if (creditPackCode != null) {
+                var creditAmount = Integer.parseInt(session.getMetadata().get("creditAmount"));
+                var newBalance = billingRepo.addCredits(advertiserId, creditAmount);
+                billingRepo.addCreditTransaction(advertiserId, "purchase", creditAmount, newBalance,
+                    session.getId(), "Compra de créditos — pack " + creditPackCode);
+                return;
+            }
+
+            var planCode = session.getMetadata().get("targetPlanCode");
             if (planCode != null) {
                 billingRepo.updatePlanCode(advertiserId, planCode);
             }

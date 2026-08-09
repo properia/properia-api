@@ -7,7 +7,10 @@ import pt.properia.api.modules.crm.domain.Lead;
 import pt.properia.api.modules.crm.infrastructure.LeadJpaRepository;
 import pt.properia.api.shared.domain.DomainException;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -22,6 +25,16 @@ public class UpdateLeadStageUseCase {
 
     private static final Set<String> VALID_CLOSE_REASONS =
         Set.of("price", "financing", "timing", "location", "competitor", "documentation", "inventory_unavailable", "other");
+
+    private static final Map<String, String> STAGE_LABELS = Map.of(
+        "new", "Novo",
+        "contacted", "Contactado",
+        "qualified", "Qualificado",
+        "visit_scheduled", "Visita agendada",
+        "proposal", "Proposta",
+        "won", "Ganho",
+        "lost", "Perdido"
+    );
 
     private final LeadJpaRepository leadRepo;
     private final ObjectMapper objectMapper;
@@ -64,6 +77,13 @@ public class UpdateLeadStageUseCase {
         }
 
         if (cmd.stage() != null) {
+            // Regista o evento ANTES de sobrescrever o stage — precisamos do valor antigo
+            // para a transição "De -> Para" ficar na timeline (advertiser-leads-page.tsx).
+            // Só aplica-se a mudanças manuais (consultor); o avanço automático via chat/visita
+            // (LeadStageAdvancer) não passa por aqui e não emite este evento.
+            if (changingStage) {
+                lead.setMetadata(appendStageChangedEvent(lead.getMetadata(), lead.getStage(), cmd.stage()));
+            }
             lead.setStage(cmd.stage());
         }
         if (cmd.assignedTo() != null) {
@@ -88,6 +108,33 @@ public class UpdateLeadStageUseCase {
         }
 
         return saved;
+    }
+
+    /** Acrescenta um evento 'stage_changed' a metadata.events (lido pela timeline em LeadController). */
+    @SuppressWarnings("unchecked")
+    private String appendStageChangedEvent(String metadataJson, String fromStage, String toStage) {
+        try {
+            var parsed = metadataJson != null && !metadataJson.isBlank()
+                ? new LinkedHashMap<String, Object>(objectMapper.readValue(metadataJson, Map.class))
+                : new LinkedHashMap<String, Object>();
+
+            var events = new ArrayList<Object>();
+            if (parsed.get("events") instanceof List<?> existing) events.addAll(existing);
+
+            var event = new LinkedHashMap<String, Object>();
+            event.put("id", "stage-" + UUID.randomUUID());
+            event.put("type", "stage_changed");
+            event.put("title", "Mudou de etapa");
+            event.put("description",
+                STAGE_LABELS.getOrDefault(fromStage, fromStage) + " → " + STAGE_LABELS.getOrDefault(toStage, toStage));
+            event.put("createdAt", Instant.now().toString());
+            events.add(event);
+
+            parsed.put("events", events);
+            return objectMapper.writeValueAsString(parsed);
+        } catch (Exception e) {
+            return metadataJson;
+        }
     }
 
     private String extractCloseReason(String metadataJson) {

@@ -45,27 +45,47 @@ public class AdvertiserBillingController {
         return ResponseEntity.ok(Map.of("data", Map.of("url", result.url())));
     }
 
-    // Credit pack sizes (credits, price in €)
-    private static final Map<String, int[]> CREDIT_PACKS = Map.of(
-        "basic",        new int[]{5,  15},
-        "standard",     new int[]{15, 39},
-        "professional", new int[]{40, 89}
-    );
-
     @PostMapping("/api/advertiser/billing/credits")
     public ResponseEntity<?> purchaseCredits(
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+        // "packCode" é o nome de campo que o frontend envia (lib/advertiser-crm-api.ts) —
+        // antes desta correção o corpo trazia "pack", nunca lido aqui, e o pedido caía sempre
+        // no pack "basic" por omissão independentemente do que o utilizador tinha escolhido.
         var packCode = body.getOrDefault("packCode", "basic").toString();
         var returnUrl = body.getOrDefault("returnUrl", "/anunciante/plano").toString();
 
-        if (!CREDIT_PACKS.containsKey(packCode)) {
-            throw new DomainException("BAD_REQUEST", "Pack de créditos inválido.", 400);
-        }
-
+        // Validação da existência do pack fica centralizada em BillingService.resolveCreditPack
+        // (chamado dentro de createCreditCheckout) — evita um segundo catálogo aqui a desalinhar
+        // do real, que foi exatamente a causa raiz deste bug.
         var result = billingService.createCreditCheckout(advertiserId, packCode, returnUrl);
         return ResponseEntity.ok(Map.of("data", Map.of("url", result.url())));
+    }
+
+    /**
+     * Resgata uma sessão de checkout "fake" (modo dev, properia.stripe.billing-provider=fake)
+     * e credita o saldo. Chamado pelo frontend ao voltar do checkout com
+     * ?checkout=fake&session=... — nunca existe em produção com Stripe real (aí quem credita
+     * é o webhook, ver StripeWebhookController).
+     */
+    @PostMapping("/api/advertiser/billing/credits/confirm-fake")
+    public ResponseEntity<?> confirmFakeCreditCheckout(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var advertiserId = requireAdvertiserId(claims);
+        var sessionIdRaw = body.get("sessionId");
+        if (sessionIdRaw == null || sessionIdRaw.toString().isBlank()) {
+            throw new DomainException("BAD_REQUEST", "sessionId em falta.", 400);
+        }
+        UUID sessionId;
+        try {
+            sessionId = UUID.fromString(sessionIdRaw.toString());
+        } catch (IllegalArgumentException e) {
+            throw new DomainException("BAD_REQUEST", "sessionId inválido.", 400);
+        }
+        var balance = billingService.confirmFakeCreditCheckout(advertiserId, sessionId);
+        return ResponseEntity.ok(Map.of("data", Map.of("balance", balance)));
     }
 
     @GetMapping("/api/advertiser/billing/credits")

@@ -112,6 +112,61 @@ public class AdvertiserBillingRepository {
     }
 
     /**
+     * Incrementa créditos atomicamente (compra confirmada). Ao contrário de spendCreditOnce,
+     * não há condição de saldo mínimo — creditar nunca deve falhar por saldo. Devolve o
+     * novo saldo.
+     */
+    public int addCredits(UUID advertiserId, int amount) {
+        return jdbc.sql("""
+                UPDATE properia.advertisers
+                SET billing_metadata = jsonb_set(
+                        COALESCE(billing_metadata, '{}'::jsonb),
+                        '{creditBalance}',
+                        to_jsonb(COALESCE((billing_metadata->>'creditBalance')::int, 0) + :amount))
+                WHERE id = :id
+                RETURNING (billing_metadata->>'creditBalance')::int
+                """)
+            .param("amount", amount)
+            .param("id", advertiserId)
+            .query(Integer.class)
+            .single();
+    }
+
+    public record FakeCheckoutSession(String packCode, int credits) {}
+
+    /** Cria a intenção de compra "fake" (modo dev) — resgatada depois via claimFakeCheckoutSession. */
+    public UUID createFakeCheckoutSession(UUID advertiserId, String packCode, int credits) {
+        return jdbc.sql("""
+                INSERT INTO properia.fake_checkout_sessions (advertiser_id, pack_code, credits)
+                VALUES (:adv, :pack, :credits)
+                RETURNING id
+                """)
+            .param("adv", advertiserId)
+            .param("pack", packCode)
+            .param("credits", credits)
+            .query(UUID.class)
+            .single();
+    }
+
+    /**
+     * Resgata a sessão "fake" UMA só vez, atomicamente (claim em WHERE, sem check-then-act) —
+     * um refresh da página de retorno nunca credita duas vezes. Devolve empty se não existir,
+     * não pertencer a este anunciante, ou já ter sido resgatada.
+     */
+    public java.util.Optional<FakeCheckoutSession> claimFakeCheckoutSession(UUID sessionId, UUID advertiserId) {
+        return jdbc.sql("""
+                UPDATE properia.fake_checkout_sessions
+                SET consumed_at = now()
+                WHERE id = :id AND advertiser_id = :adv AND consumed_at IS NULL
+                RETURNING pack_code, credits
+                """)
+            .param("id", sessionId)
+            .param("adv", advertiserId)
+            .query((rs, n) -> new FakeCheckoutSession(rs.getString("pack_code"), rs.getInt("credits")))
+            .optional();
+    }
+
+    /**
      * Ativa o trial UMA só vez, atomicamente (plano + metadata num único UPDATE guardado).
      * Devolve true se ativou agora, false se já estava ativo (correção #6).
      */
