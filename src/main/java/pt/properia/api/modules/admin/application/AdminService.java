@@ -141,7 +141,7 @@ public class AdminService {
 
         jdbc.sql("""
                 INSERT INTO properia.advertiser_users (advertiser_id, user_id, membership_role, created_at)
-                VALUES (:adv, :uid, :role, now())
+                VALUES (:adv, :uid, :role::properia.advertiser_membership_role, now())
                 """)
             .param("adv", advertiserId).param("uid", userId).param("role", role)
             .update();
