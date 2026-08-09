@@ -39,7 +39,7 @@ public class ForgotPasswordUseCase {
             normalizedEmail,
             "password_reset",
             tokenHash,
-            Instant.now().plusSeconds(3600)
+            Instant.now().plusSeconds(86400)  // 24 horas (era 1 hora)
         ));
 
         emailService.sendPasswordReset(normalizedEmail, opaqueToken);
