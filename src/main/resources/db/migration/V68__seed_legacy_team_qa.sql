@@ -58,7 +58,7 @@ INSERT INTO properia.app_users (
 ) ON CONFLICT (email) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────
--- 2. USER_AUTH_IDENTITIES — Autenticação BCrypt
+-- 2. USER_AUTH_IDENTITIES — Autenticação (sem password, usar /forgot-password)
 -- ──────────────────────────────────────────────────────────
 
 INSERT INTO properia.user_auth_identities (
@@ -69,9 +69,9 @@ INSERT INTO properia.user_auth_identities (
     'local',
     'ricardo.oliveira@century21.pt',
     'ricardo.oliveira@century21.pt',
-    true,
-    '$2b$10$RQvjWz0W2rZ6K5LpMNq9ZO7qW8vX2tY3uZ4aB5cD6eF7gH8iJ9kL0',
-    'bcrypt',
+    false,
+    NULL,
+    NULL,
     NOW(),
     NOW()
   ),
@@ -80,9 +80,9 @@ INSERT INTO properia.user_auth_identities (
     'local',
     'sofia.martins@century21.pt',
     'sofia.martins@century21.pt',
-    true,
-    '$2b$10$RQvjWz0W2rZ6K5LpMNq9ZO7qW8vX2tY3uZ4aB5cD6eF7gH8iJ9kL0',
-    'bcrypt',
+    false,
+    NULL,
+    NULL,
     NOW(),
     NOW()
   ),
@@ -91,9 +91,9 @@ INSERT INTO properia.user_auth_identities (
     'local',
     'joao.silva@century21.pt',
     'joao.silva@century21.pt',
-    true,
-    '$2b$10$RQvjWz0W2rZ6K5LpMNq9ZO7qW8vX2tY3uZ4aB5cD6eF7gH8iJ9kL0',
-    'bcrypt',
+    false,
+    NULL,
+    NULL,
     NOW(),
     NOW()
   )

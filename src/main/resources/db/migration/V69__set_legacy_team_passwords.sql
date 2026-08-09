@@ -1,0 +1,37 @@
+-- ============================================================
+-- PROPERIA — V69: Set Legacy Team Passwords (SCRYPT)
+-- Configurar senhas SCRYPT válidas para CENTURY 21 LEGACY TEAM
+-- Instrução manual: usar /forgot-password endpoint em vez disto
+-- ============================================================
+
+-- NOTA IMPORTANTE:
+-- Este script não pode ser usado diretamente porque gerar SCRYPT requer Java.
+--
+-- SOLUÇÃO MANUAL (2 opções):
+--
+-- Opção 1: Ricardo/Sofia/João usam /forgot-password
+--   POST /api/auth/forgot-password
+--   Body: {"email": "ricardo.oliveira@century21.pt"}
+--   → Recebem email com link para reset
+--   → Definem nova password via UI
+--   → SCRYPT hash gerado automaticamente
+--
+-- Opção 2: DBA gera hashes SCRYPT via Java e usa UPDATE:
+--   UPDATE properia.user_auth_identities
+--   SET password_hash = 'scrypt$<salt>$<hash>',
+--       password_algorithm = 'scrypt'
+--   WHERE email = 'ricardo.oliveira@century21.pt';
+--
+-- Por agora, deixar como NULL e deixar que façam forgot-password.
+-- Este script fica como template.
+
+-- Template para quando tiver hashes SCRYPT válidos:
+--
+-- UPDATE properia.user_auth_identities
+-- SET password_hash = 'scrypt$<valid_salt_and_hash_for_Legacy2026>',
+--     password_algorithm = 'scrypt'
+-- WHERE email IN (
+--   'ricardo.oliveira@century21.pt',
+--   'sofia.martins@century21.pt',
+--   'joao.silva@century21.pt'
+-- );
