@@ -139,7 +139,7 @@ public class TeamService {
     public InviteDto createInvite(UUID advertiserId, UUID invitedByUserId, String email, String role) {
         email = email.trim().toLowerCase();
         if (!email.contains("@")) throw new DomainException("BAD_REQUEST", "Email inválido.", 400);
-        if (!Set.of("admin", "editor", "viewer", "sales").contains(role))
+        if (role == null || !Set.of("admin", "editor", "viewer", "sales").contains(role))
             throw new DomainException("BAD_REQUEST", "Role inválida.", 400);
 
         var finalEmail = email;
@@ -191,7 +191,7 @@ public class TeamService {
     }
 
     public void addMemberByEmail(UUID advertiserId, UUID requestorUserId, String email, String role) {
-        if (!Set.of("admin", "editor", "sales", "viewer").contains(role))
+        if (role == null || !Set.of("admin", "editor", "sales", "viewer").contains(role))
             throw new DomainException("BAD_REQUEST", "Role inválida.", 400);
 
         // Only owner/admin can add directly
