@@ -133,7 +133,7 @@ public class AdvertiserListingController {
             @AuthenticationPrincipal JwtClaims claims,
             @RequestBody Map<String, Object> body) {
         var advertiserId = resolveAdvertiserId(claims);
-        var result = patchListingService.patch(id, advertiserId, body);
+        var result = patchListingService.patch(id, advertiserId, claims.userId(), body);
         return ResponseEntity.ok(Map.of("data", result));
     }
 

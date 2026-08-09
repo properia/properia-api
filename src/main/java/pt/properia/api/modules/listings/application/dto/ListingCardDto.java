@@ -38,5 +38,6 @@ public record ListingCardDto(
     String zoneProcessingStatus,
     Instant publishedAt,
     Instant firstPublishedAt,
-    Instant createdAt
+    Instant createdAt,
+    String importSource
 ) {}

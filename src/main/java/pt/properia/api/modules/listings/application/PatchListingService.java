@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -35,8 +36,10 @@ public class PatchListingService {
         this.readinessValidator = readinessValidator;
     }
 
+    private static final Set<String> ROLES_ALLOWED_TO_REASSIGN = Set.of("owner", "admin");
+
     @SuppressWarnings("unchecked")
-    public Map<String, Object> patch(UUID listingId, UUID advertiserId, Map<String, Object> body) {
+    public Map<String, Object> patch(UUID listingId, UUID advertiserId, UUID requestorUserId, Map<String, Object> body) {
         var listing = repository.findByIdAndAdvertiserId(listingId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
         final BigDecimal priceBeforePatch = listing.getPriceAmount();
@@ -67,7 +70,18 @@ public class PatchListingService {
         }
 
         // ── Agent assignment ──────────────────────────────────────────────────
+        // A UI só mostra esta ação a owner/admin (advertiser-listings-browser-page.tsx),
+        // mas isso não impede uma chamada direta à API — a regra tem de valer aqui também.
         if (body.containsKey("assignedAgentId")) {
+            var requestorRole = jdbc.sql("""
+                    SELECT membership_role FROM properia.advertiser_users
+                    WHERE advertiser_id = :adv AND user_id = :uid
+                    """).param("adv", advertiserId).param("uid", requestorUserId)
+                .query(String.class).optional()
+                .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão para reatribuir este anúncio.", 403));
+            if (!ROLES_ALLOWED_TO_REASSIGN.contains(requestorRole))
+                throw new DomainException("FORBIDDEN", "Apenas owner ou admin podem reatribuir o consultor responsável.", 403);
+
             var agentId = str(body, "assignedAgentId");
             listing.setOwnerUserId(agentId != null && !agentId.isBlank() ? UUID.fromString(agentId) : null);
         }

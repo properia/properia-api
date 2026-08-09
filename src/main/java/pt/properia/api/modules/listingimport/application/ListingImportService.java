@@ -164,6 +164,10 @@ public class ListingImportService {
                     null, null, null, null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null
                 ));
+                jdbc.sql("UPDATE properia.listings SET import_source = 'import' WHERE id = :id")
+                    .param("id", listing.getId())
+                    .update();
+
                 var images = i < parsed.imagesByRow().size() ? parsed.imagesByRow().get(i) : List.<String>of();
                 insertImportedMedia(listing.getId(), images);
                 created.add(new CreatedListing(

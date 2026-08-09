@@ -75,7 +75,7 @@ public class JpaListingRepository implements ListingRepository {
                        COALESCE(l.latitude, loc.latitude)   AS latitude,
                        COALESCE(l.longitude, loc.longitude) AS longitude,
                        zs.zone_label_primary, zs.zone_summary_short, zsnap.status AS zone_processing_status,
-                       l.published_at, l.first_published_at, l.created_at
+                       l.published_at, l.first_published_at, l.created_at, l.import_source
                 FROM properia.listings l
                 LEFT JOIN properia.listing_location loc ON loc.listing_id = l.id
                 LEFT JOIN properia.listing_zone_scores zs  ON zs.listing_id  = l.id
@@ -123,7 +123,8 @@ public class JpaListingRepository implements ListingRepository {
                 rs.getString("zone_processing_status"),
                 toInstant(rs.getTimestamp("published_at")),
                 toInstant(rs.getTimestamp("first_published_at")),
-                toInstant(rs.getTimestamp("created_at"))
+                toInstant(rs.getTimestamp("created_at")),
+                rs.getString("import_source")
             ))
             .list();
     }
@@ -253,7 +254,8 @@ public class JpaListingRepository implements ListingRepository {
             l.getConditionDeclared(), l.getFurnishedDeclared(),
             l.getLatitude(), l.getLongitude(),
             null, null, null,
-            l.getPublishedAt(), l.getFirstPublishedAt(), l.getCreatedAt()
+            l.getPublishedAt(), l.getFirstPublishedAt(), l.getCreatedAt(),
+            null
         );
     }
 
