@@ -27,24 +27,30 @@ public class TeamInvitePublicController {
     public ResponseEntity<?> getInvite(@PathVariable String token) {
         var invite = jdbc.sql("""
                 SELECT i.id, i.advertiser_id, i.email, i.membership_role,
-                       i.accepted_at, i.expires_at, a.brand_name
+                       i.accepted_at, i.expires_at, a.brand_name, a.logo_url,
+                       u.full_name AS invited_by_name
                 FROM properia.advertiser_team_invites i
                 JOIN properia.advertisers a ON a.id = i.advertiser_id
+                JOIN properia.app_users u ON u.id = i.invited_by_user_id
                 WHERE i.token = :token
                 """)
             .param("token", token)
             .query((rs, n) -> {
                 var expiresAt = rs.getTimestamp("expires_at");
                 var accepted = rs.getTimestamp("accepted_at");
+                var isExpired = expiresAt != null && expiresAt.toInstant().isBefore(Instant.now());
+                var status = accepted != null ? "accepted" : isExpired ? "expired" : "pending";
+
                 var row = new HashMap<String, Object>();
                 row.put("id", rs.getString("id"));
                 row.put("advertiserId", rs.getString("advertiser_id"));
                 row.put("email", rs.getString("email"));
                 row.put("membershipRole", rs.getString("membership_role"));
-                row.put("acceptedAt", accepted != null ? accepted.toInstant().toString() : null);
+                row.put("status", status);
                 row.put("expiresAt", expiresAt != null ? expiresAt.toInstant().toString() : null);
                 row.put("advertiserName", Optional.ofNullable(rs.getString("brand_name")).orElse("Anunciante"));
-                row.put("expired", expiresAt != null && expiresAt.toInstant().isBefore(Instant.now()));
+                row.put("advertiserLogoUrl", rs.getString("logo_url"));
+                row.put("invitedByName", Optional.ofNullable(rs.getString("invited_by_name")).orElse("Um colega"));
                 return row;
             })
             .optional()
