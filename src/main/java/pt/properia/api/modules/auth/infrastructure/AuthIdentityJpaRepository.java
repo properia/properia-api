@@ -26,7 +26,7 @@ interface AuthIdentityJpaRepository extends JpaRepository<UserAuthIdentity, UUID
 
     @Modifying
     @Transactional
-    @Query("UPDATE UserAuthIdentity i SET i.passwordHash = :hash, i.passwordAlgorithm = :algo WHERE i.userId = :userId AND i.provider = 'local'")
+    @Query(value = "UPDATE properia.user_auth_identities SET password_hash = :hash, password_algorithm = :algo::properia.password_algorithm WHERE user_id = :userId AND provider = 'local'", nativeQuery = true)
     void updatePassword(@Param("userId") UUID userId, @Param("hash") String hash, @Param("algo") String algo);
 
     @Modifying
