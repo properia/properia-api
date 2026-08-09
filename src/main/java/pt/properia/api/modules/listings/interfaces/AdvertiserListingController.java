@@ -45,7 +45,7 @@ public class AdvertiserListingController {
     @GetMapping
     public ResponseEntity<?> list(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = resolveAdvertiserId(claims);
-        var listings = getListingsUseCase.execute(new GetAdvertiserListingsUseCase.Query(advertiserId));
+        var listings = getListingsUseCase.execute(new GetAdvertiserListingsUseCase.Query(advertiserId, claims.userId()));
         return ResponseEntity.ok(Map.of("data", listings));
     }
 

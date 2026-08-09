@@ -124,7 +124,13 @@ public class LeadController {
             whereParts.add("l.source::text = :source");
             params.put("source", source);
         }
-        if (assignedToUserId != null && !assignedToUserId.isBlank()) {
+        // Sales só vê os próprios leads — força o filtro por assigned_to = eu,
+        // ignorando qualquer assignedToUserId enviado pelo cliente (não confiar
+        // no filtro opcional da UI para isolar dados de outros consultores).
+        if (isScopedToSelf(advertiserId, claims.userId())) {
+            whereParts.add("l.assigned_to = :assignedTo::uuid");
+            params.put("assignedTo", claims.userId().toString());
+        } else if (assignedToUserId != null && !assignedToUserId.isBlank()) {
             whereParts.add("l.assigned_to = :assignedTo::uuid");
             params.put("assignedTo", assignedToUserId);
         }
@@ -539,6 +545,11 @@ public class LeadController {
                 return (Map<String, Object>) m;
             }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
+
+        if (isScopedToSelf(advertiserId, claims.userId())
+                && !claims.userId().toString().equals(lead.get("assignedToUserId"))) {
+            throw new DomainException("NOT_FOUND", "Lead não encontrado.", 404);
+        }
         return ResponseEntity.ok(Map.of("data", lead));
     }
 
@@ -653,6 +664,17 @@ public class LeadController {
             throw new DomainException("FORBIDDEN",
                 "Este lead está atribuído a outro consultor. Só owner ou admin podem reatribuí-lo ou mudar o seu estágio.", 403);
         }
+    }
+
+    // Sales só vê os seus próprios dados (leads/visitas); owner/admin/editor veem
+    // tudo. Não usar para "viewer" (esse é leitura total, sem escrita).
+    private boolean isScopedToSelf(UUID advertiserId, UUID userId) {
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", userId)
+            .query(String.class).optional().orElse(null);
+        return "sales".equals(role);
     }
 
     private UUID requireAdvertiserId(JwtClaims claims) {

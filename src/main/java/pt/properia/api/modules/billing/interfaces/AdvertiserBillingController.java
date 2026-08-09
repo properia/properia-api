@@ -88,9 +88,20 @@ public class AdvertiserBillingController {
         return ResponseEntity.ok(Map.of("data", Map.of("balance", balance)));
     }
 
+    private static final java.util.Set<String> ROLES_ALLOWED_BILLING = java.util.Set.of("owner", "admin");
+
     @GetMapping("/api/advertiser/billing/credits")
     public ResponseEntity<?> getCredits(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+        // Saldo e histórico de créditos são dados financeiros da agência — só owner/admin.
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", claims.userId())
+            .query(String.class).optional().orElse(null);
+        if (!ROLES_ALLOWED_BILLING.contains(role)) {
+            throw new DomainException("FORBIDDEN", "Sem permissão para ver a faturação da agência.", 403);
+        }
         var balance = billingService.getCreditBalance(advertiserId);
         var transactions = jdbc.sql("""
                 SELECT id::text, type, amount, balance_after, description, created_at

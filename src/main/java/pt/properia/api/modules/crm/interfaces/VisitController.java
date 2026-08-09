@@ -337,13 +337,20 @@ public class VisitController {
         // trabalhar o contacto) ou do imóvel (quem angariou/é responsável por ele).
         // São filtros distintos e não mutuamente exclusivos (mesmo padrão de
         // ListAdvertiserVisitsParams no FE: assignedToUserId vs listingAssignedToUserId).
-        if (assignedToUserId != null && !assignedToUserId.isBlank()) {
-            whereParts.add("l.assigned_to = :assignedTo::uuid");
-            params.put("assignedTo", assignedToUserId);
-        }
-        if (listingAssignedToUserId != null && !listingAssignedToUserId.isBlank()) {
-            whereParts.add("li.owner_user_id = :listingAssignedTo::uuid");
-            params.put("listingAssignedTo", listingAssignedToUserId);
+        if (isScopedToSelf(advertiserId, claims.userId())) {
+            // Sales só vê visitas do lead ou do imóvel que lhe pertencem — ignora
+            // qualquer assignedToUserId/listingAssignedToUserId enviado pelo cliente.
+            whereParts.add("(l.assigned_to = :selfId::uuid OR li.owner_user_id = :selfId::uuid)");
+            params.put("selfId", claims.userId().toString());
+        } else {
+            if (assignedToUserId != null && !assignedToUserId.isBlank()) {
+                whereParts.add("l.assigned_to = :assignedTo::uuid");
+                params.put("assignedTo", assignedToUserId);
+            }
+            if (listingAssignedToUserId != null && !listingAssignedToUserId.isBlank()) {
+                whereParts.add("li.owner_user_id = :listingAssignedTo::uuid");
+                params.put("listingAssignedTo", listingAssignedToUserId);
+            }
         }
 
         var whereClause = "WHERE " + String.join(" AND ", whereParts);
@@ -965,6 +972,16 @@ public class VisitController {
             throw new DomainException("FORBIDDEN", "Sem acesso a anunciante.", 403);
         }
         return claims.activeAdvertiserId();
+    }
+
+    // Sales só vê as suas próprias visitas (via lead ou imóvel); owner/admin/editor veem tudo.
+    private boolean isScopedToSelf(UUID advertiserId, UUID userId) {
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", userId)
+            .query(String.class).optional().orElse(null);
+        return "sales".equals(role);
     }
 
     private String hashSha256(String input) {
