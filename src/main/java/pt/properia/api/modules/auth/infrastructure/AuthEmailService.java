@@ -3,6 +3,8 @@ package pt.properia.api.modules.auth.infrastructure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import pt.properia.api.shared.domain.DomainException;
@@ -16,27 +18,31 @@ public class AuthEmailService {
     private static final Logger log = LoggerFactory.getLogger(AuthEmailService.class);
 
     private final WebClient resendClient;
+    private final JavaMailSender mailSender;
     private final String from;
     private final String appUrl;
-    private final boolean enabled;
+    private final boolean resendEnabled;
 
     public AuthEmailService(
         @Value("${properia.email.resend-api-key:}") String resendApiKey,
         @Value("${properia.email.from:Properia <noreply@properia.pt>}") String from,
-        @Value("${properia.app.url:http://localhost:3000}") String appUrl
+        @Value("${properia.app.url:http://localhost:3000}") String appUrl,
+        JavaMailSender mailSender
     ) {
         this.from = from;
         this.appUrl = appUrl;
-        this.enabled = resendApiKey != null && !resendApiKey.isBlank();
-        this.resendClient = WebClient.builder()
+        this.mailSender = mailSender;
+        this.resendEnabled = resendApiKey != null && !resendApiKey.isBlank();
+        this.resendClient = resendEnabled ? WebClient.builder()
             .baseUrl("https://api.resend.com")
             .defaultHeader("Authorization", "Bearer " + resendApiKey)
             .defaultHeader("Content-Type", "application/json")
-            .build();
-        if (this.enabled) {
-            log.info("Email service enabled: from={} appUrl={}", from, appUrl);
+            .build() : null;
+
+        if (this.resendEnabled) {
+            log.info("Email service enabled: RESEND API, from={} appUrl={}", from, appUrl);
         } else {
-            log.warn("Email service DISABLED — RESEND_API_KEY not set. Emails will not be sent.");
+            log.info("Email service enabled: SMTP (Mailtrap), from={} appUrl={}", from, appUrl);
         }
     }
 
@@ -164,10 +170,14 @@ public class AuthEmailService {
     }
 
     private void send(String to, String subject, String htmlBody, String textBody) {
-        if (!enabled) {
-            log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);
-            return;
+        if (resendEnabled) {
+            sendViaResend(to, subject, htmlBody, textBody);
+        } else {
+            sendViaSMTP(to, subject, htmlBody, textBody);
         }
+    }
+
+    private void sendViaResend(String to, String subject, String htmlBody, String textBody) {
         try {
             resendClient.post()
                 .uri("/emails")
@@ -189,11 +199,27 @@ public class AuthEmailService {
                 )
                 .toBodilessEntity()
                 .block(java.time.Duration.ofSeconds(10));
-            log.info("Email sent ok: from='{}' to={} subject='{}'", from, to, subject);
+            log.info("Email sent via RESEND API: from='{}' to={} subject='{}'", from, to, subject);
         } catch (DomainException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Failed to send email from='{}' to={} subject='{}': {}", from, to, subject, e.getMessage());
+            log.error("Failed to send email via Resend from='{}' to={} subject='{}': {}", from, to, subject, e.getMessage());
+            throw new DomainException("EMAIL_SEND_FAILED", "Não foi possível enviar o email: " + e.getMessage(), 503);
+        }
+    }
+
+    private void sendViaSMTP(String to, String subject, String htmlBody, String textBody) {
+        try {
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(from);
+            message.setTo(to);
+            message.setSubject(subject);
+            message.setText(textBody);
+
+            mailSender.send(message);
+            log.info("Email sent via SMTP: from='{}' to={} subject='{}'", from, to, subject);
+        } catch (Exception e) {
+            log.error("Failed to send email via SMTP from='{}' to={} subject='{}': {}", from, to, subject, e.getMessage());
             throw new DomainException("EMAIL_SEND_FAILED", "Não foi possível enviar o email: " + e.getMessage(), 503);
         }
     }
