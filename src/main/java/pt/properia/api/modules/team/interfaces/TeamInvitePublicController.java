@@ -24,15 +24,14 @@ public class TeamInvitePublicController {
 
     @GetMapping("/{token}")
     public ResponseEntity<?> getInvite(@PathVariable String token) {
-        var tokenHash = hashToken(token);
         var invite = jdbc.sql("""
                 SELECT i.id, i.advertiser_id, i.email, i.membership_role,
                        i.accepted_at, i.expires_at, a.brand_name
                 FROM properia.advertiser_team_invites i
                 JOIN properia.advertisers a ON a.id = i.advertiser_id
-                WHERE i.token_hash = :hash
+                WHERE i.token = :token
                 """)
-            .param("hash", tokenHash)
+            .param("token", token)
             .query((rs, n) -> {
                 var expiresAt = rs.getTimestamp("expires_at");
                 return Map.of(
@@ -58,14 +57,12 @@ public class TeamInvitePublicController {
         if (claims == null || claims.userId() == null) {
             throw new DomainException("UNAUTHORIZED", "Precisas de entrar para aceitar o convite.", 401);
         }
-        var tokenHash = hashToken(token);
-
         var invite = jdbc.sql("""
                 SELECT id, advertiser_id, email, membership_role, accepted_at, expires_at
                 FROM properia.advertiser_team_invites
-                WHERE token_hash = :hash
+                WHERE token = :token
                 """)
-            .param("hash", tokenHash)
+            .param("token", token)
             .query((rs, n) -> Map.of(
                 "id", rs.getString("id"),
                 "advertiserId", rs.getString("advertiser_id"),
@@ -127,15 +124,5 @@ public class TeamInvitePublicController {
             "advertiserId", advertiserId.toString(),
             "membershipRole", invite.get("membershipRole")
         )));
-    }
-
-    private String hashToken(String token) {
-        try {
-            var md = java.security.MessageDigest.getInstance("SHA-256");
-            var hash = md.digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            return token;
-        }
     }
 }

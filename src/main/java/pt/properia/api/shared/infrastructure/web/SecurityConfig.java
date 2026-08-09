@@ -110,8 +110,9 @@ public class SecurityConfig {
                 // Commute directions (public — used on listing card/detail route preview)
                 .requestMatchers(HttpMethod.GET, "/api/commute/**").permitAll()
 
-                // Team invitations (token-based)
-                .requestMatchers(HttpMethod.GET, "/api/convite/**").permitAll()
+                // Team invitations (token-based) — só o lookup público de detalhe do convite;
+                // POST .../accept continua a exigir sessão (o próprio endpoint valida o email).
+                .requestMatchers(HttpMethod.GET, "/api/team/invites/*").permitAll()
 
                 // Everything else requires authentication
                 .anyRequest().authenticated()
