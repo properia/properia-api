@@ -32,7 +32,21 @@ public class AdvertiserMetricsService {
         List<Object> closeReasons
     ) {}
 
-    public MetricsDto getMetrics(UUID advertiserId, String source) {
+    // Isolamento por consultor: quando não-nulo, restringe a leads atribuídos a este
+    // utilizador OU a leads de imóveis de que é responsável — mesmo critério usado em
+    // Leads/Visitas/Imóveis/Chat. NULL (owner/admin) = agregado da agência inteira.
+    private static final String LEAD_SCOPE_SQL = """
+            AND (
+                CAST(:scopeUserId AS uuid) IS NULL
+                OR l.assigned_to = :scopeUserId
+                OR EXISTS (
+                    SELECT 1 FROM properia.listings sl
+                    WHERE sl.id = l.listing_id AND sl.owner_user_id = :scopeUserId
+                )
+            )
+            """;
+
+    public MetricsDto getMetrics(UUID advertiserId, String source, UUID scopeUserId) {
         var now = Instant.now();
         var d1 = now.minus(1, ChronoUnit.DAYS);
         var d7 = now.minus(7, ChronoUnit.DAYS);
@@ -47,9 +61,10 @@ public class AdvertiserMetricsService {
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = l.listing_id
                 WHERE l.advertiser_id = :adv
                   AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
-                """)
+                """ + LEAD_SCOPE_SQL)
             .param("adv", advertiserId)
-            .param("source", (source != null && !source.equals("todas")) ? source : null)
+            .param("source", srcParam)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> new Object[]{
                 rs.getString("stage"),
                 rs.getString("source"),
@@ -65,10 +80,12 @@ public class AdvertiserMetricsService {
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.advertiser_id = :adv
                   AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                """ + LEAD_SCOPE_SQL + """
                 GROUP BY v.status
                 """)
             .param("adv", advertiserId)
-            .param("source", (source != null && !source.equals("todas")) ? source : null)
+            .param("source", srcParam)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> Map.entry(rs.getString("status"), rs.getLong("cnt")))
             .list();
 
@@ -127,8 +144,8 @@ public class AdvertiserMetricsService {
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.advertiser_id = :adv
                   AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
-                """)
-            .param("adv", advertiserId).param("source", srcParam)
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("source", srcParam).param("scopeUserId", scopeUserId)
             .query(Long.class).single();
 
         // Tempo médio (min) até à 1ª resposta do anunciante = 1º de (resposta comercial
@@ -150,8 +167,8 @@ public class AdvertiserMetricsService {
                 WHERE l.advertiser_id = :adv
                   AND fr.first_response >= l.created_at
                   AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
-                """)
-            .param("adv", advertiserId).param("source", srcParam)
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("source", srcParam).param("scopeUserId", scopeUserId)
             .query(Integer.class).optional().orElse(null);
 
         // Motivos de não avanço — agregados de leads.metadata->>'closeReason'. Antes devolvia
@@ -162,10 +179,11 @@ public class AdvertiserMetricsService {
                 WHERE l.advertiser_id = :adv
                   AND l.metadata->>'closeReason' IS NOT NULL
                   AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                """ + LEAD_SCOPE_SQL + """
                 GROUP BY l.metadata->>'closeReason'
                 ORDER BY total DESC
                 """)
-            .param("adv", advertiserId).param("source", srcParam)
+            .param("adv", advertiserId).param("source", srcParam).param("scopeUserId", scopeUserId)
             .query((rs, n) -> (Object) new CloseReasonItem(rs.getString("reason"), (int) rs.getLong("total")))
             .list();
 
@@ -183,7 +201,7 @@ public class AdvertiserMetricsService {
         // CRM contract expresses responseRate as a 0–100 percentage (see AdvertiserMetricsResponse).
         // Same underlying definition as Pulse's responseRate (leads that moved past 'new'/'lost'),
         // computed via the shared helper and just scaled differently per contract.
-        double responseRate = Math.round(computeResponseFraction(advertiserId, d30) * 1000) / 10.0;
+        double responseRate = Math.round(computeResponseFraction(advertiserId, d30, scopeUserId) * 1000) / 10.0;
 
         return new MetricsDto(
             total, today, (int) leadRows.stream().filter(r -> {
@@ -208,20 +226,20 @@ public class AdvertiserMetricsService {
      * (i.e. tiveram alguma resposta/avanço) ou foram perdidos. Fonte única partilhada
      * por getMetrics() (expõe como % 0–100) e getPulse() (expõe como fração 0–1).
      */
-    private double computeResponseFraction(UUID advertiserId, Instant since) {
+    private double computeResponseFraction(UUID advertiserId, Instant since, UUID scopeUserId) {
         var ts = java.sql.Timestamp.from(since);
         long leadsSince = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.leads
-                WHERE advertiser_id = :adv AND created_at > :since
-                """)
-            .param("adv", advertiserId).param("since", ts)
+                SELECT COUNT(*) FROM properia.leads l
+                WHERE l.advertiser_id = :adv AND l.created_at > :since
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("since", ts).param("scopeUserId", scopeUserId)
             .query(Long.class).single();
         long respondedSince = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.leads
-                WHERE advertiser_id = :adv AND created_at > :since
-                  AND stage::text NOT IN ('new','lost')
-                """)
-            .param("adv", advertiserId).param("since", ts)
+                SELECT COUNT(*) FROM properia.leads l
+                WHERE l.advertiser_id = :adv AND l.created_at > :since
+                  AND l.stage::text NOT IN ('new','lost')
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("since", ts).param("scopeUserId", scopeUserId)
             .query(Long.class).single();
         return leadsSince > 0 ? (double) respondedSince / leadsSince : 0.0;
     }
@@ -238,7 +256,7 @@ public class AdvertiserMetricsService {
         Map<String, Integer> funnel
     ) {}
 
-    public List<ListingMetricItem> getListingMetrics(UUID advertiserId) {
+    public List<ListingMetricItem> getListingMetrics(UUID advertiserId, UUID scopeUserId) {
         return jdbc.sql("""
                 SELECT li.id, li.title, li.public_id, li.city, li.district, li.status,
                        COUNT(DISTINCT dv.id) AS detail_views_total,
@@ -260,10 +278,12 @@ public class AdvertiserMetricsService {
                 LEFT JOIN properia.listing_detail_views dv ON dv.listing_id = li.id
                 WHERE li.advertiser_id = :adv
                   AND li.status::text != 'archived'
+                  AND (CAST(:scopeUserId AS uuid) IS NULL OR li.owner_user_id = :scopeUserId)
                 GROUP BY li.id, li.title, li.public_id, li.city, li.district, li.status, p.list_price, p.price_currency
                 ORDER BY leads_total DESC, li.created_at DESC
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 int leadsTotal = rs.getInt("leads_total");
                 int visitsTotal = rs.getInt("visits_total");
@@ -340,7 +360,7 @@ public class AdvertiserMetricsService {
 
     // ── Pulse ─────────────────────────────────────────────────────────────────
 
-    public Map<String, Object> getPulse(UUID advertiserId) {
+    public Map<String, Object> getPulse(UUID advertiserId, UUID scopeUserId) {
         var now = Instant.now();
         var ts7dAgo  = java.sql.Timestamp.from(now.minus(7, ChronoUnit.DAYS));
         var ts30dAgo = java.sql.Timestamp.from(now.minus(30, ChronoUnit.DAYS));
@@ -361,11 +381,12 @@ public class AdvertiserMetricsService {
         funnelMap.put("qualified", 0); funnelMap.put("proposal", 0);
         funnelMap.put("won", 0); funnelMap.put("lost", 0);
         jdbc.sql("""
-                SELECT stage::text, COUNT(*) AS cnt FROM properia.leads
-                WHERE advertiser_id = :adv
-                GROUP BY stage
+                SELECT l.stage::text, COUNT(*) AS cnt FROM properia.leads l
+                WHERE l.advertiser_id = :adv
+                """ + LEAD_SCOPE_SQL + """
+                GROUP BY l.stage
                 """)
-            .param("adv", advertiserId)
+            .param("adv", advertiserId).param("scopeUserId", scopeUserId)
             .query((rs, n) -> Map.entry(rs.getString("stage"), (int) rs.getLong("cnt")))
             .list()
             .forEach(e -> funnelMap.put(e.getKey(), e.getValue()));
@@ -375,15 +396,15 @@ public class AdvertiserMetricsService {
 
         // New leads in last 7 days
         var newLeads = jdbc.sql("""
-                SELECT COUNT(*) FROM properia.leads
-                WHERE advertiser_id = :adv AND created_at > :since
-                """)
-            .param("adv", advertiserId).param("since", ts7dAgo)
+                SELECT COUNT(*) FROM properia.leads l
+                WHERE l.advertiser_id = :adv AND l.created_at > :since
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("since", ts7dAgo).param("scopeUserId", scopeUserId)
             .query(Long.class).single().intValue();
 
         // Response rate (0–1 fraction, Pulse's contract scale): leads in last 30 days
         // that moved past 'new' / total. Same definition as getMetrics(), via shared helper.
-        double responseRate = computeResponseFraction(advertiserId, now.minus(30, ChronoUnit.DAYS));
+        double responseRate = computeResponseFraction(advertiserId, now.minus(30, ChronoUnit.DAYS), scopeUserId);
 
         // Visits (use lead join same as getMetrics)
         var visitStats = jdbc.sql("""
@@ -391,9 +412,10 @@ public class AdvertiserMetricsService {
                 FROM properia.visits v
                 JOIN properia.leads l ON l.id = v.lead_id
                 WHERE v.advertiser_id = :adv AND l.created_at > :since
+                """ + LEAD_SCOPE_SQL + """
                 GROUP BY v.status
                 """)
-            .param("adv", advertiserId).param("since", ts30dAgo)
+            .param("adv", advertiserId).param("since", ts30dAgo).param("scopeUserId", scopeUserId)
             .query((rs, n) -> Map.entry(rs.getString("status"), (int) rs.getLong("cnt")))
             .list();
         // "Adesão" = confirmadas ÷ TODAS as visitas pedidas. Antes o denominador contava
@@ -419,12 +441,14 @@ public class AdvertiserMetricsService {
                     (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
                     OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
                   )
+                """ + LEAD_SCOPE_SQL + """
                 ORDER BY l.updated_at ASC
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
             .param("slaCutoff", ts72hAgo)
             .param("proposalCutoff", ts72hAgo)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var ts = rs.getTimestamp("updated_at");
                 long days = ts != null ? ChronoUnit.DAYS.between(ts.toInstant(), now) : 0;
@@ -453,10 +477,11 @@ public class AdvertiserMetricsService {
                     (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
                     OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
                   )
-                """)
+                """ + LEAD_SCOPE_SQL)
             .param("adv", advertiserId)
             .param("slaCutoff", ts72hAgo)
             .param("proposalCutoff", ts72hAgo)
+            .param("scopeUserId", scopeUserId)
             .query(Long.class).single().intValue();
 
         // Total de leads (histórico) — para distinguir uma conta SEM atividade de uma
@@ -518,8 +543,8 @@ public class AdvertiserMetricsService {
                 WHERE l.advertiser_id = :adv
                   AND l.created_at > :since
                   AND fr.first_response >= l.created_at
-                """)
-            .param("adv", advertiserId).param("since", ts30dAgo)
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("since", ts30dAgo).param("scopeUserId", scopeUserId)
             .query(Integer.class).optional().orElse(null);
 
         var result = new LinkedHashMap<String, Object>();

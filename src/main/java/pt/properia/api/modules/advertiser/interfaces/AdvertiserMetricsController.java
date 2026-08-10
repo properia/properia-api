@@ -34,7 +34,7 @@ public class AdvertiserMetricsController {
             @RequestParam(required = false) String source,
             @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        var data = metricsService.getMetrics(advertiserId, source);
+        var data = metricsService.getMetrics(advertiserId, source, scopeUserId(advertiserId, claims.userId()));
         return ResponseEntity.ok(Map.of("data", data));
     }
 
@@ -58,7 +58,7 @@ public class AdvertiserMetricsController {
     @GetMapping("/api/advertiser/listings/metrics")
     public ResponseEntity<?> getListingMetrics(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
-        var items = metricsService.getListingMetrics(advertiserId);
+        var items = metricsService.getListingMetrics(advertiserId, scopeUserId(advertiserId, claims.userId()));
         return ResponseEntity.ok(Map.of("data", Map.of("items", items)));
     }
 
@@ -67,7 +67,7 @@ public class AdvertiserMetricsController {
         var advertiserId = requireAdvertiserId(claims);
         // Radar comercial (pulse) é Pro+ — os restantes /metrics do dashboard são de todos os planos.
         planGuard.requireProFeatures(advertiserId);
-        var data = metricsService.getPulse(advertiserId);
+        var data = metricsService.getPulse(advertiserId, scopeUserId(advertiserId, claims.userId()));
         return ResponseEntity.ok(Map.of("data", data));
     }
 
@@ -76,5 +76,19 @@ public class AdvertiserMetricsController {
             throw new DomainException("FORBIDDEN", "Acesso negado.", 403);
         }
         return claims.activeAdvertiserId();
+    }
+
+    /**
+     * Isolamento de métricas por perfil: sales só vê o próprio pipeline/KPIs/ações
+     * sugeridas (nunca dados agregados de colegas) — owner/admin/editor continuam
+     * a ver o agregado da agência inteira (devolve null = sem filtro).
+     */
+    private UUID scopeUserId(UUID advertiserId, UUID requestorUserId) {
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(String.class).optional().orElse(null);
+        return "sales".equals(role) ? requestorUserId : null;
     }
 }
