@@ -89,7 +89,7 @@ public class CopilotoController {
             : List.<Map<String, Object>>of();
 
         var startMs = System.currentTimeMillis();
-        var context = buildContext(advertiserId);
+        var context = buildContext(advertiserId, scopeUserId(advertiserId, claims.userId()));
         var answer = callOpenAI(context, question, history);
         var durationMs = System.currentTimeMillis() - startMs;
 
@@ -116,36 +116,100 @@ public class CopilotoController {
         return ResponseEntity.ok(Map.of("data", result));
     }
 
+    // ── Escopo por perfil ─────────────────────────────────────────────────────
+
+    /**
+     * Isolamento do contexto por perfil — mesmo critério de AdvertiserMetricsController:
+     * sales só "vê" a sua própria carteira; owner/admin/editor/viewer mantêm a visão
+     * global da agência (devolve null = sem filtro).
+     *
+     * Crítico aqui porque o contexto do Copiloto é injetado no prompt do modelo: sem
+     * isto, um consultor podia perguntar "quais os meus leads prioritários?" e receber
+     * nomes de contactos e imóveis de colegas — uma fuga de dados pessoais, não apenas
+     * uma imprecisão de resposta.
+     */
+    private UUID scopeUserId(UUID advertiserId, UUID requestorUserId) {
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(String.class).optional().orElse(null);
+        return "sales".equals(role) ? requestorUserId : null;
+    }
+
+    /**
+     * "Meu" = lead atribuído a mim OU lead de um imóvel que angariei. listings.owner_user_id
+     * e leads.assigned_to são campos independentes (atribuir um imóvel não atribui os leads
+     * que ele gera), por isso as duas condições são necessárias — mesmo critério do
+     * LeadController e do LEAD_SCOPE_SQL de AdvertiserMetricsService.
+     * Requer os aliases `ld` (leads) e `l` (listings) na query.
+     */
+    private static final String LEAD_SCOPE = """
+             AND (CAST(:scopeUserId AS uuid) IS NULL
+                  OR ld.assigned_to = :scopeUserId
+                  OR l.owner_user_id = :scopeUserId)
+            """;
+
     // ── Context builder ───────────────────────────────────────────────────────
 
-    private Map<String, Object> buildContext(UUID advertiserId) {
+    private Map<String, Object> buildContext(UUID advertiserId, UUID scopeUserId) {
         var ctx = new LinkedHashMap<String, Object>();
-        try { ctx.put("operationSummary", loadOperationSummary(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("priorityLeads", loadPriorityLeads(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("leadsWithoutResponse", loadLeadsWithoutResponse(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("visitsToConfirm", loadVisitsToConfirm(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("listingPerformance", loadListingPerformance(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("importStatus", loadImportStatus(advertiserId)); } catch (Exception ignored) {}
-        try { ctx.put("leadsBySource", loadLeadsBySource(advertiserId)); } catch (Exception ignored) {}
+        try { ctx.put("operationSummary", loadOperationSummary(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("priorityLeads", loadPriorityLeads(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("leadsWithoutResponse", loadLeadsWithoutResponse(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("visitsToConfirm", loadVisitsToConfirm(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("listingPerformance", loadListingPerformance(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("importStatus", loadImportStatus(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        try { ctx.put("leadsBySource", loadLeadsBySource(advertiserId, scopeUserId)); } catch (Exception ignored) {}
+        // Diz ao modelo que o contexto é parcial — sem isto, um consultor pergunta
+        // "quantos leads tem a agência?" e recebe o seu próprio número como se fosse global.
+        ctx.put("scope", scopeUserId != null
+            ? "APENAS a carteira própria deste consultor (leads atribuídos a ele ou de imóveis que angariou). NÃO é a visão da agência inteira — se perguntarem por números globais, esclarece que só tens acesso à carteira dele."
+            : "Toda a agência.");
         return ctx;
     }
 
-    private Map<String, Object> loadOperationSummary(UUID advertiserId) {
+    private Map<String, Object> loadOperationSummary(UUID advertiserId, UUID scopeUserId) {
+        // Subconsultas escalares em vez de um único FROM com três LEFT JOINs: a versão
+        // anterior juntava `visits` só por advertiser_id (sem relação com a linha de
+        // listing), produzindo um produto cartesiano listings × visits que o
+        // COUNT(DISTINCT) mascarava — correto no resultado, caro na execução. Assim cada
+        // métrica lê só o que precisa e cada uma recebe o seu próprio filtro de escopo.
         return jdbc.sql("""
                 SELECT
-                  COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'published') AS active_listings,
-                  COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'draft') AS draft_listings,
-                  COUNT(DISTINCT ld.id) AS total_leads,
-                  COUNT(DISTINCT ld.id) FILTER (WHERE ld.stage = 'new') AS new_leads,
-                  COUNT(DISTINCT ld.id) FILTER (WHERE ld.stage IN ('new','contacted','visit_scheduled') AND ld.created_at > now() - interval '7 days') AS leads_this_week,
-                  COUNT(DISTINCT v.id) FILTER (WHERE v.status = 'requested') AS visits_pending,
-                  COUNT(DISTINCT v.id) FILTER (WHERE v.status = 'confirmed' AND v.starts_at > now()) AS visits_upcoming
-                FROM properia.listings l
-                LEFT JOIN properia.leads ld ON ld.listing_id = l.id
-                LEFT JOIN properia.visits v ON v.advertiser_id = :adv
-                WHERE l.advertiser_id = :adv
+                  (SELECT COUNT(*) FROM properia.listings l
+                    WHERE l.advertiser_id = :adv AND l.status = 'published'
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR l.owner_user_id = :scopeUserId)) AS active_listings,
+                  (SELECT COUNT(*) FROM properia.listings l
+                    WHERE l.advertiser_id = :adv AND l.status = 'draft'
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR l.owner_user_id = :scopeUserId)) AS draft_listings,
+                  (SELECT COUNT(*) FROM properia.leads ld
+                     JOIN properia.listings l ON l.id = ld.listing_id
+                    WHERE l.advertiser_id = :adv
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR ld.assigned_to = :scopeUserId OR l.owner_user_id = :scopeUserId)) AS total_leads,
+                  (SELECT COUNT(*) FROM properia.leads ld
+                     JOIN properia.listings l ON l.id = ld.listing_id
+                    WHERE l.advertiser_id = :adv AND ld.stage = 'new'
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR ld.assigned_to = :scopeUserId OR l.owner_user_id = :scopeUserId)) AS new_leads,
+                  (SELECT COUNT(*) FROM properia.leads ld
+                     JOIN properia.listings l ON l.id = ld.listing_id
+                    WHERE l.advertiser_id = :adv
+                      AND ld.stage IN ('new','contacted','visit_scheduled')
+                      AND ld.created_at > now() - interval '7 days'
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR ld.assigned_to = :scopeUserId OR l.owner_user_id = :scopeUserId)) AS leads_this_week,
+                  (SELECT COUNT(*) FROM properia.visits v
+                     JOIN properia.listings l ON l.id = v.listing_id
+                     LEFT JOIN properia.leads ld ON ld.id = v.lead_id
+                    WHERE v.advertiser_id = :adv AND v.status = 'requested'
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR ld.assigned_to = :scopeUserId OR l.owner_user_id = :scopeUserId)) AS visits_pending,
+                  (SELECT COUNT(*) FROM properia.visits v
+                     JOIN properia.listings l ON l.id = v.listing_id
+                     LEFT JOIN properia.leads ld ON ld.id = v.lead_id
+                    WHERE v.advertiser_id = :adv AND v.status = 'confirmed' AND v.starts_at > now()
+                      AND (CAST(:scopeUserId AS uuid) IS NULL OR ld.assigned_to = :scopeUserId OR l.owner_user_id = :scopeUserId)) AS visits_upcoming
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("activeListings", rs.getInt("active_listings"));
@@ -159,7 +223,7 @@ public class CopilotoController {
             }).single();
     }
 
-    private List<Map<String, Object>> loadPriorityLeads(UUID advertiserId) {
+    private List<Map<String, Object>> loadPriorityLeads(UUID advertiserId, UUID scopeUserId) {
         return jdbc.sql("""
                 SELECT ld.id, ld.contact_name, ld.stage, ld.source::text,
                        ld.created_at, ld.updated_at,
@@ -169,10 +233,12 @@ public class CopilotoController {
                 JOIN properia.listings l ON l.id = ld.listing_id
                 WHERE l.advertiser_id = :adv
                   AND ld.stage IN ('new', 'contacted', 'visit_scheduled', 'proposal')
+                """ + LEAD_SCOPE + """
                 ORDER BY ld.updated_at ASC
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("id", rs.getString("id"));
@@ -186,7 +252,7 @@ public class CopilotoController {
             }).list();
     }
 
-    private List<Map<String, Object>> loadLeadsWithoutResponse(UUID advertiserId) {
+    private List<Map<String, Object>> loadLeadsWithoutResponse(UUID advertiserId, UUID scopeUserId) {
         return jdbc.sql("""
                 SELECT ld.id, ld.contact_name, ld.stage, ld.source::text, ld.created_at,
                        l.title AS listing_title,
@@ -196,10 +262,12 @@ public class CopilotoController {
                 WHERE l.advertiser_id = :adv
                   AND ld.stage = 'new'
                   AND ld.created_at < now() - interval '48 hours'
+                """ + LEAD_SCOPE + """
                 ORDER BY ld.created_at ASC
                 LIMIT 8
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("id", rs.getString("id"));
@@ -211,7 +279,7 @@ public class CopilotoController {
             }).list();
     }
 
-    private List<Map<String, Object>> loadVisitsToConfirm(UUID advertiserId) {
+    private List<Map<String, Object>> loadVisitsToConfirm(UUID advertiserId, UUID scopeUserId) {
         return jdbc.sql("""
                 SELECT v.id, v.starts_at, v.status, v.mode::text,
                        l.title AS listing_title, l.street, l.city,
@@ -221,10 +289,12 @@ public class CopilotoController {
                 LEFT JOIN properia.leads ld ON ld.id = v.lead_id
                 WHERE v.advertiser_id = :adv
                   AND v.status = 'requested'
+                """ + LEAD_SCOPE + """
                 ORDER BY v.starts_at ASC
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("id", rs.getString("id"));
@@ -237,7 +307,10 @@ public class CopilotoController {
             }).list();
     }
 
-    private List<Map<String, Object>> loadListingPerformance(UUID advertiserId) {
+    private List<Map<String, Object>> loadListingPerformance(UUID advertiserId, UUID scopeUserId) {
+        // Escopo pelo angariador (owner_user_id): o desempenho dos imóveis de colegas não é
+        // contexto do consultor. Note-se que aqui NÃO se filtra por ld.assigned_to — as
+        // contagens são do imóvel, e um imóvel meu conta todos os leads que gerou.
         return jdbc.sql("""
                 SELECT l.id, l.title, l.status, l.price_amount, l.property_type::text,
                        l.city,
@@ -247,11 +320,13 @@ public class CopilotoController {
                 LEFT JOIN properia.leads ld ON ld.listing_id = l.id
                 WHERE l.advertiser_id = :adv
                   AND l.status IN ('published', 'draft')
+                  AND (CAST(:scopeUserId AS uuid) IS NULL OR l.owner_user_id = :scopeUserId)
                 GROUP BY l.id
                 ORDER BY leads_30d DESC, total_leads DESC
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("title", rs.getString("title"));
@@ -265,16 +340,20 @@ public class CopilotoController {
             }).list();
     }
 
-    private List<Map<String, Object>> loadImportStatus(UUID advertiserId) {
+    private List<Map<String, Object>> loadImportStatus(UUID advertiserId, UUID scopeUserId) {
+        // Importações são operação de agência; um consultor só vê as que ele próprio
+        // lançou (created_by_user_id), não o histórico de importações dos colegas.
         return jdbc.sql("""
                 SELECT id, status, source_family::text, total_rows,
                        created_rows, merged_rows, rejected_rows, created_at
                 FROM properia.crm_import_batches
                 WHERE advertiser_id = :adv
+                  AND (CAST(:scopeUserId AS uuid) IS NULL OR created_by_user_id = :scopeUserId)
                 ORDER BY created_at DESC
                 LIMIT 5
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("status", rs.getString("status"));
@@ -288,17 +367,19 @@ public class CopilotoController {
             }).list();
     }
 
-    private List<Map<String, Object>> loadLeadsBySource(UUID advertiserId) {
+    private List<Map<String, Object>> loadLeadsBySource(UUID advertiserId, UUID scopeUserId) {
         return jdbc.sql("""
                 SELECT ld.source::text AS source, COUNT(*) AS total
                 FROM properia.leads ld
                 JOIN properia.listings l ON l.id = ld.listing_id
                 WHERE l.advertiser_id = :adv
                   AND ld.created_at > now() - interval '30 days'
+                """ + LEAD_SCOPE + """
                 GROUP BY ld.source
                 ORDER BY total DESC
                 """)
             .param("adv", advertiserId)
+            .param("scopeUserId", scopeUserId)
             .query((rs, n) -> Map.<String, Object>of(
                 "source", rs.getString("source"),
                 "total", rs.getInt("total")
@@ -333,7 +414,7 @@ public class CopilotoController {
             ? (List<Map<String, Object>>) body.get("history")
             : List.<Map<String, Object>>of();
 
-        var context = buildContext(advertiserId);
+        var context = buildContext(advertiserId, scopeUserId(advertiserId, claims.userId()));
         var startMs = System.currentTimeMillis();
 
         StreamingResponseBody responseBody = outputStream -> {
