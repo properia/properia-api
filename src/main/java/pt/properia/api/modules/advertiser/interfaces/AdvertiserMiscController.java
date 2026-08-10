@@ -522,6 +522,16 @@ public class AdvertiserMiscController {
     @GetMapping("/api/advertiser/automation")
     public ResponseEntity<?> getAutomation(@AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+
+        // Isolamento por consultor: sales só vê tarefas de leads/imóveis próprios —
+        // mesmo critério já aplicado a Leads/Visitas/Métricas/Pulse.
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", claims.userId())
+            .query(String.class).optional().orElse(null);
+        UUID scopeUserId = "sales".equals(role) ? claims.userId() : null;
+
         // Return overdue leads as automation tasks (same logic as pulse)
         var tasks = jdbc.sql("""
                 SELECT l.id, l.contact_name, l.stage, l.listing_id, l.created_at,
@@ -530,9 +540,14 @@ public class AdvertiserMiscController {
                 LEFT JOIN properia.listings li ON li.id = l.listing_id
                 WHERE l.advertiser_id = :adv
                   AND l.stage NOT IN ('won', 'lost')
+                  AND (
+                    CAST(:scopeUserId AS uuid) IS NULL
+                    OR l.assigned_to = :scopeUserId
+                    OR li.owner_user_id = :scopeUserId
+                  )
                 ORDER BY l.created_at ASC
                 LIMIT 20
-                """).param("adv", advertiserId)
+                """).param("adv", advertiserId).param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var m = new LinkedHashMap<String, Object>();
                 var leadId = rs.getString("id");
