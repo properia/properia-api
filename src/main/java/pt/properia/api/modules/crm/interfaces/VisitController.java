@@ -291,6 +291,10 @@ public class VisitController {
         // A confirmação avança o lead para 'visit_scheduled' (forward-only) dentro do
         // próprio use case, pelo que não regride leads já em proposal/won.
         updateVisitStatus.execute(new UpdateVisitStatusUseCase.Command(visit.getId(), advertiserId, "confirmed", meetingUrl));
+        // A visita já nasce 'confirmed' neste caminho (marcação manual), mas antes só o
+        // /confirm e o PATCH de status disparavam a sincronização com a agenda pessoal do
+        // consultor — aqui nunca corria, mesmo já estando confirmada.
+        userCalendarSync.syncVisitToConsultantCalendar(visit.getId());
 
         var result = new java.util.LinkedHashMap<String, Object>();
         result.put("id", visit.getId().toString());

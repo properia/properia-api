@@ -166,16 +166,17 @@ public class UserCalendarSyncService {
     public void removeVisitFromConsultantCalendar(UUID visitId) {
         try {
             var row = jdbc.sql("""
-                    SELECT v.consultant_calendar_event_id, l.assigned_to
+                    SELECT v.consultant_calendar_event_id, COALESCE(l.assigned_to, li.owner_user_id) AS consultant_id
                     FROM properia.visits v
                     LEFT JOIN properia.leads l ON l.id = v.lead_id
+                    LEFT JOIN properia.listings li ON li.id = v.listing_id
                     WHERE v.id = :id
                     """)
                 .param("id", visitId)
                 .query((rs, n) -> {
                     var m = new LinkedHashMap<String, Object>();
                     m.put("eventId", rs.getString("consultant_calendar_event_id"));
-                    m.put("consultantId", rs.getString("assigned_to"));
+                    m.put("consultantId", rs.getString("consultant_id"));
                     return m;
                 }).optional().orElse(null);
 
@@ -224,7 +225,8 @@ public class UserCalendarSyncService {
     private Map<String, Object> loadVisitForSync(UUID visitId) {
         return jdbc.sql("""
                 SELECT v.status::text, v.starts_at, v.ends_at, v.mode, v.meeting_url, v.consultant_calendar_event_id,
-                       l.assigned_to, l.contact_name, l.contact_phone, l.contact_email,
+                       COALESCE(l.assigned_to, li.owner_user_id) AS consultant_id,
+                       l.contact_name, l.contact_phone, l.contact_email,
                        li.title AS listing_title, li.city, li.district
                 FROM properia.visits v
                 LEFT JOIN properia.leads l ON l.id = v.lead_id
@@ -240,8 +242,14 @@ public class UserCalendarSyncService {
                 m.put("mode", rs.getString("mode"));
                 m.put("meetingUrl", rs.getString("meeting_url"));
                 m.put("consultantCalendarEventId", rs.getString("consultant_calendar_event_id"));
-                var assignedTo = rs.getString("assigned_to");
-                m.put("consultantId", assignedTo != null ? UUID.fromString(assignedTo) : null);
+                // Fallback para o dono do imóvel quando o lead ainda não tem consultor
+                // atribuído — atribuir um imóvel a alguém (listings.owner_user_id) não
+                // atribui automaticamente os leads/visitas gerados nesse imóvel
+                // (leads.assigned_to), são dois campos independentes no modelo de dados.
+                // Sem isto, um imóvel corretamente atribuído nunca sincronizava a agenda
+                // de ninguém enquanto o lead ficasse sem consultor explícito.
+                var consultantId = rs.getString("consultant_id");
+                m.put("consultantId", consultantId != null ? UUID.fromString(consultantId) : null);
                 m.put("contactName", rs.getString("contact_name"));
                 m.put("contactPhone", rs.getString("contact_phone"));
                 m.put("contactEmail", rs.getString("contact_email"));
