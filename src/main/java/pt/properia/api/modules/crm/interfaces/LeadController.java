@@ -76,6 +76,16 @@ public class LeadController {
             @AuthenticationPrincipal JwtClaims claims,
             @Valid @RequestBody CreateLeadRequest req) {
 
+        // req.metadata() carrega contexto de captação que não cabe no enum lead_source
+        // (ex.: { sourceContext: 'estimated_costs_sidebar' }). Falha silenciosa em "{}"
+        // se o mapa vier malformado — nunca deve bloquear a criação do lead.
+        String metadataJson = "{}";
+        if (req.metadata() != null && !req.metadata().isEmpty()) {
+            try {
+                metadataJson = objectMapper.writeValueAsString(req.metadata());
+            } catch (Exception ignored) {}
+        }
+
         var lead = createLead.execute(new CreateLeadUseCase.Command(
             req.listingId(),
             claims != null ? claims.userId() : null,
@@ -85,7 +95,7 @@ public class LeadController {
             req.contactName(),
             req.contactEmail(),
             req.contactPhone(),
-            "{}"
+            metadataJson
         ));
 
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
