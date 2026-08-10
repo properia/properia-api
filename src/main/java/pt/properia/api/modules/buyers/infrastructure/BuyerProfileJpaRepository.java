@@ -30,5 +30,10 @@ public interface BuyerProfileJpaRepository extends JpaRepository<BuyerProfile, U
 
     Optional<BuyerProfile> findByConsentToken(UUID consentToken);
 
+    // Query nomeada por método (`WHERE b.status = ?1`) gera SQL sem cast, e Postgres não
+    // compara "properia.buyer_profile_status = character varying" implicitamente — rebentava
+    // com "operator does not exist" sempre que corria (ver syncMatchesForAdvertiser). Mesmo
+    // cast explícito já usado em search() acima.
+    @Query("SELECT b FROM BuyerProfile b WHERE b.advertiserId = :advertiserId AND CAST(b.status AS string) = :status")
     List<BuyerProfile> findAllByAdvertiserIdAndStatus(UUID advertiserId, String status);
 }
