@@ -110,11 +110,14 @@ public class LeadController {
             @RequestParam(defaultValue = "20") int pageSize,
             @RequestParam(required = false) String assignedToUserId) {
         var advertiserId = requireAdvertiserId(claims);
+        var slaHours = fetchSlaHours(advertiserId);
 
         var whereParts = new ArrayList<String>();
         var params = new java.util.LinkedHashMap<String, Object>();
         whereParts.add("l.advertiser_id = :adv");
         params.put("adv", advertiserId);
+        params.put("leadHours", slaHours.leadHours());
+        params.put("proposalHours", slaHours.proposalHours());
 
         if (stage != null && !stage.isBlank() && !"todos".equals(stage)) {
             whereParts.add("l.stage::text = :stage");
@@ -147,16 +150,25 @@ public class LeadController {
             params.put("dateTo", dateTo);
         }
         // ── slaBucket (TEMPO) vs priority (VALOR) — duas lentes distintas ──────────
-        // slaBucket deriva da IDADE (fresh <24h, attention <72h, late >=72h) → higiene
-        // de resposta ("estou a falhar no tempo"). Tem de ir para o WHERE em SQL —
-        // filtrar em memória DEPOIS do LIMIT/OFFSET desalinha total/totalPages.
+        // slaBucket deriva da IDADE (fresh/attention/late) → higiene de resposta
+        // ("estou a falhar no tempo"). Tem de ir para o WHERE em SQL — filtrar em
+        // memória DEPOIS do LIMIT/OFFSET desalinha total/totalPages.
         // Leads fechados (won/lost) não têm SLA pendente, por isso são excluídos.
+        // O limiar de "late" é configurável por agência (properia.advertisers.settings):
+        // leadFollowUpHours para a generalidade dos leads, proposalFollowUpHours para os
+        // que já estão em proposta (avisos diferentes: "sem resposta" vs "sem avanço na
+        // proposta"). "fresh" é 1/3 desse limiar — preserva a proporção original (24/72).
         final String activeOnly = " AND l.stage::text NOT IN ('won','lost')";
+        final String lateThresholdExpr =
+            "make_interval(hours => CASE WHEN l.stage::text = 'proposal' THEN :proposalHours ELSE :leadHours END)";
+        final String freshThresholdExpr =
+            "make_interval(hours => (CASE WHEN l.stage::text = 'proposal' THEN :proposalHours ELSE :leadHours END) / 3)";
         if (slaBucket != null && !slaBucket.isBlank() && !"todas".equals(slaBucket)) {
             whereParts.add(switch (slaBucket) {
-                case "fresh" -> "l.created_at > now() - interval '24 hours'" + activeOnly;
-                case "attention" -> "l.created_at <= now() - interval '24 hours' AND l.created_at > now() - interval '72 hours'" + activeOnly;
-                case "late" -> "l.created_at <= now() - interval '72 hours'" + activeOnly;
+                case "fresh" -> "l.created_at > now() - " + freshThresholdExpr + activeOnly;
+                case "attention" -> "l.created_at <= now() - " + freshThresholdExpr
+                    + " AND l.created_at > now() - " + lateThresholdExpr + activeOnly;
+                case "late" -> "l.created_at <= now() - " + lateThresholdExpr + activeOnly;
                 default -> "true";
             });
         }
@@ -236,18 +248,23 @@ public class LeadController {
             m.put("timeline", List.of());
             m.put("conversation", List.of());
 
-            // Compute slaBucket from age
+            var stg = rs.getString("stage");
+
+            // Compute slaBucket from age — limiar "late" configurável por agência
+            // (leadFollowUpHours / proposalFollowUpHours, ver fetchSlaHours()); "fresh"
+            // é 1/3 desse limiar, mesma proporção que o WHERE acima.
             var createdAt = rs.getTimestamp("created_at").toInstant();
             m.put("createdAt", createdAt.toString());
             m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
             long ageHours = Duration.between(createdAt, now).toHours();
-            String bucket = ageHours < 24 ? "fresh" : ageHours < 72 ? "attention" : "late";
+            int lateHoursForStage = "proposal".equals(stg) ? slaHours.proposalHours() : slaHours.leadHours();
+            int freshHoursForStage = Math.max(1, lateHoursForStage / 3);
+            String bucket = ageHours < freshHoursForStage ? "fresh" : ageHours < lateHoursForStage ? "attention" : "late";
             m.put("slaBucket", bucket);
 
             // priority = bucket do LEAD_SCORE (valor), decoupled da idade. Leads
             // fechados (won/lost) nunca são "high" — o score dá-lhes etapa 0, mas
             // forçamos low para a UI nunca marcar um negócio ganho como prioritário.
-            var stg = rs.getString("stage");
             boolean closedStage = "won".equals(stg) || "lost".equals(stg);
             int leadScore = rs.getInt("lead_score");
             String priorityBucket = closedStage ? "low"
@@ -634,6 +651,24 @@ public class LeadController {
             case "meeting" -> "Reunião realizada";
             default -> "Resposta registada";
         };
+    }
+
+    private record SlaHours(int leadHours, int proposalHours) {}
+
+    /**
+     * Limiares de SLA configurados pela agência (modal "Mensagens prontas a usar",
+     * properia.advertisers.settings->>'leadFollowUpHours'/'proposalFollowUpHours').
+     * Antes eram 24h/72h fixos no código, ignorando por completo o que o
+     * owner/admin configurava — o formulário gravava valores que nada lia.
+     */
+    private SlaHours fetchSlaHours(UUID advertiserId) {
+        return jdbc.sql("""
+                SELECT COALESCE((settings->>'leadFollowUpHours')::int, 6) AS lead_hours,
+                       COALESCE((settings->>'proposalFollowUpHours')::int, 48) AS proposal_hours
+                FROM properia.advertisers WHERE id = :adv
+                """).param("adv", advertiserId)
+            .query((rs, n) -> new SlaHours(rs.getInt("lead_hours"), rs.getInt("proposal_hours")))
+            .optional().orElse(new SlaHours(6, 48));
     }
 
     private static final java.util.Set<String> ROLES_ALLOWED_TO_MODIFY_ANY_LEAD = java.util.Set.of("owner", "admin");

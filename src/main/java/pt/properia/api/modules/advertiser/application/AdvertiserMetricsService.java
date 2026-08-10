@@ -219,11 +219,14 @@ public class AdvertiserMetricsService {
         double responseRate = Math.round(computeResponseFraction(advertiserId, d30, scopeUserId) * 1000) / 10.0;
 
         var decisionDossierImpact = computeDecisionDossierImpact(advertiserId, srcParam, scopeUserId);
+        var slaHours = fetchSlaHours(advertiserId);
 
         return new MetricsDto(
             total, today, (int) leadRows.stream().filter(r -> {
+                var stg = (String) r[0];
                 var age = ChronoUnit.HOURS.between((Instant) r[2], Instant.now());
-                return age >= 72 && !"won".equals(r[0]) && !"lost".equals(r[0]);
+                int lateThreshold = "proposal".equals(stg) ? slaHours.proposalHours() : slaHours.leadHours();
+                return age >= lateThreshold && !"won".equals(stg) && !"lost".equals(stg);
             }).count(),
             0,
             (int) visitsRequested, (int) visitsConfirmed,
@@ -250,6 +253,23 @@ public class AdvertiserMetricsService {
      * colegas).
      */
     private record DossierLeadRow(String stage, boolean hasVisit, boolean hasConfirmedVisit, boolean hasDossier) {}
+
+    private record SlaHours(int leadHours, int proposalHours) {}
+
+    /**
+     * Limiares de SLA configurados pela agência (modal "Mensagens prontas a usar",
+     * properia.advertisers.settings->>'leadFollowUpHours'/'proposalFollowUpHours').
+     * Antes o Dashboard e o Pulse usavam 72h fixo, ignorando a configuração da agência.
+     */
+    private SlaHours fetchSlaHours(UUID advertiserId) {
+        return jdbc.sql("""
+                SELECT COALESCE((settings->>'leadFollowUpHours')::int, 6) AS lead_hours,
+                       COALESCE((settings->>'proposalFollowUpHours')::int, 48) AS proposal_hours
+                FROM properia.advertisers WHERE id = :adv
+                """).param("adv", advertiserId)
+            .query((rs, n) -> new SlaHours(rs.getInt("lead_hours"), rs.getInt("proposal_hours")))
+            .optional().orElse(new SlaHours(6, 48));
+    }
 
     private DecisionDossierImpactDto computeDecisionDossierImpact(UUID advertiserId, String source, UUID scopeUserId) {
         var rows = jdbc.sql("""
@@ -450,10 +470,11 @@ public class AdvertiserMetricsService {
         var now = Instant.now();
         var ts7dAgo  = java.sql.Timestamp.from(now.minus(7, ChronoUnit.DAYS));
         var ts30dAgo = java.sql.Timestamp.from(now.minus(30, ChronoUnit.DAYS));
-        // Limiar único de "precisa de seguimento" = 72h, alinhado com o bucket "late"
-        // da página de Leads. Antes o Radar usava 48h e a página 72h → o mesmo conceito
-        // aparecia com dois números diferentes ao mesmo utilizador.
-        var ts72hAgo = java.sql.Timestamp.from(now.minus(72, ChronoUnit.HOURS));
+        // Limiar de "precisa de seguimento" configurado pela agência (mesmas leadFollowUpHours/
+        // proposalFollowUpHours do bucket "late" da página de Leads) — antes era 72h fixo.
+        var slaHours = fetchSlaHours(advertiserId);
+        var tsSlaCutoff = java.sql.Timestamp.from(now.minus(slaHours.leadHours(), ChronoUnit.HOURS));
+        var tsProposalCutoff = java.sql.Timestamp.from(now.minus(slaHours.proposalHours(), ChronoUnit.HOURS));
 
         // Week label (ISO week / year)
         var today = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Lisbon"));
@@ -532,8 +553,8 @@ public class AdvertiserMetricsService {
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
-            .param("slaCutoff", ts72hAgo)
-            .param("proposalCutoff", ts72hAgo)
+            .param("slaCutoff", tsSlaCutoff)
+            .param("proposalCutoff", tsProposalCutoff)
             .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
                 var ts = rs.getTimestamp("updated_at");
@@ -565,8 +586,8 @@ public class AdvertiserMetricsService {
                   )
                 """ + LEAD_SCOPE_SQL)
             .param("adv", advertiserId)
-            .param("slaCutoff", ts72hAgo)
-            .param("proposalCutoff", ts72hAgo)
+            .param("slaCutoff", tsSlaCutoff)
+            .param("proposalCutoff", tsProposalCutoff)
             .param("scopeUserId", scopeUserId)
             .query(Long.class).single().intValue();
 

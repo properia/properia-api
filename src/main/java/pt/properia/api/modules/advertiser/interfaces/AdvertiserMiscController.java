@@ -87,10 +87,24 @@ public class AdvertiserMiscController {
         return ResponseEntity.ok(Map.of("data", data));
     }
 
+    private static final Set<String> ROLES_ALLOWED_COMMERCIAL_SETTINGS = Set.of("owner", "admin");
+
     @PatchMapping("/api/advertiser/commercial-settings")
     public ResponseEntity<?> updateCommercialSettings(@RequestBody Map<String, Object> body,
                                                       @AuthenticationPrincipal JwtClaims claims) {
         var advertiserId = requireAdvertiserId(claims);
+
+        // Templates e SLA são partilhados por toda a agência — só owner/admin podem
+        // sobrescrever o que os colegas veem/usam (mesmo padrão de "Gerir equipa").
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", claims.userId())
+            .query(String.class).optional().orElse(null);
+        if (!ROLES_ALLOWED_COMMERCIAL_SETTINGS.contains(role)) {
+            throw new DomainException("FORBIDDEN", "Apenas owner ou admin podem alterar as definições comerciais da agência.", 403);
+        }
+
         var existing = jdbc.sql("SELECT settings::text FROM properia.advertisers WHERE id = :id")
             .param("id", advertiserId)
             .query((rs, n) -> parseJson(rs.getString("settings")))
