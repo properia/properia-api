@@ -9,4 +9,7 @@ import java.util.UUID;
 public interface ChatMessageJpaRepository extends JpaRepository<ChatMessage, UUID> {
 
     List<ChatMessage> findByConversationIdOrderByCreatedAtAsc(UUID conversationId);
+
+    // Uso do lado do comprador — nunca deve ver notas internas da equipa.
+    List<ChatMessage> findByConversationIdAndIsInternalFalseOrderByCreatedAtAsc(UUID conversationId);
 }

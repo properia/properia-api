@@ -44,6 +44,11 @@ public class ChatMessage {
     @Column(nullable = false, columnDefinition = "text")
     private String body;
 
+    // Nota interna — visível só à equipa do anunciante, nunca ao comprador
+    // (filtrada explicitamente em todas as queries/eventos do lado do buyer).
+    @Column(name = "is_internal", nullable = false)
+    private boolean isInternal = false;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -59,6 +64,7 @@ public class ChatMessage {
     public UUID getSenderUserId() { return senderUserId; }
     public String getMessageType() { return messageType; }
     public String getBody() { return body; }
+    public boolean isInternal() { return isInternal; }
     public Instant getCreatedAt() { return createdAt; }
 
     public void setConversationId(UUID conversationId) { this.conversationId = conversationId; }
@@ -68,4 +74,5 @@ public class ChatMessage {
     public void setSenderType(String senderType) { this.senderType = senderType; }
     public void setSenderUserId(UUID senderUserId) { this.senderUserId = senderUserId; }
     public void setBody(String body) { this.body = body; }
+    public void setInternal(boolean internal) { this.isInternal = internal; }
 }

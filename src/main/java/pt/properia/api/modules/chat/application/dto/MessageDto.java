@@ -10,5 +10,6 @@ public record MessageDto(
     UUID senderUserId,
     String messageType,
     String body,
-    Instant createdAt
+    Instant createdAt,
+    boolean isInternal
 ) {}

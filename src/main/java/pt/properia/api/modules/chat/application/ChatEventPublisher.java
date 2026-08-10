@@ -47,4 +47,16 @@ public class ChatEventPublisher {
             ));
         }
     }
+
+    /**
+     * Notas internas nunca vão para o tópico partilhado da conversa
+     * (/topic/conv.{id}, ao qual o comprador também está subscrito) nem para o
+     * tópico do comprador — só avisa a inbox do anunciante para refrescar a lista.
+     */
+    public void publishInternalNote(UUID advertiserId, MessageDto message) {
+        messaging.convertAndSend("/topic/adv." + advertiserId, Map.of(
+            "type", "unread_update",
+            "conversationId", message.conversationId().toString()
+        ));
+    }
 }

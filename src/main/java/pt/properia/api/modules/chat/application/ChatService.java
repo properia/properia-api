@@ -75,7 +75,10 @@ public class ChatService {
         return toDto(conv, messages);
     }
 
-    public MessageDto sendAdvertiserMessage(UUID conversationId, UUID advertiserId, UUID senderUserId, String body) {
+    public MessageDto sendAdvertiserMessage(UUID conversationId, UUID advertiserId, UUID senderUserId, String body, boolean isInternal) {
+        assertAdvertiserAccess(conversationId, advertiserId, senderUserId,
+            new DomainException("FORBIDDEN", "Sem permissão para responder nesta conversa.", 403));
+
         var conv = conversationRepo.findByIdAndAdvertiserId(conversationId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Conversa não encontrada."));
 
@@ -84,23 +87,61 @@ public class ChatService {
         }
 
         var message = buildMessage(conv, "advertiser_member", senderUserId, body);
+        message.setInternal(isInternal);
         var saved = messageRepo.save(message);
+        var dto = toMessageDto(saved);
+
+        if (isInternal) {
+            // Nota interna: nunca atualiza o preview/última mensagem que o comprador vê
+            // (o comprador lê chat_conversations.last_message_preview do lado dele), nunca
+            // avança o estágio do lead, e só notifica a inbox do próprio anunciante.
+            eventPublisher.publishInternalNote(conv.getAdvertiserId(), dto);
+            return dto;
+        }
 
         updateConversationPreview(conv, body);
         // Responder ao comprador é, por si só, "contactar" o lead — avança o funil
         // (apenas para a frente; não regride leads já mais avançados ou fechados).
         leadStageAdvancer.advanceForward(conv.getLeadId(), conv.getAdvertiserId(), "contacted");
-        var dto = toMessageDto(saved);
         eventPublisher.publishNewMessage(conv.getId(), conv.getAdvertiserId(), conv.getBuyerUserId(), dto);
         return dto;
     }
 
-    public void closeConversation(UUID conversationId, UUID advertiserId) {
+    public void closeConversation(UUID conversationId, UUID advertiserId, UUID requestorUserId) {
+        assertAdvertiserAccess(conversationId, advertiserId, requestorUserId,
+            new DomainException("FORBIDDEN", "Sem permissão para encerrar esta conversa.", 403));
+
         var conv = conversationRepo.findByIdAndAdvertiserId(conversationId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Conversa não encontrada."));
         conv.setStatus("closed");
         conv.setClosedAt(Instant.now());
         conversationRepo.save(conv);
+    }
+
+    /**
+     * Isolamento por consultor: sales só acede a conversas cujo lead esteja atribuído
+     * a si (lead.assigned_to) ou cujo imóvel seja da sua responsabilidade
+     * (listing.owner_user_id) — mesmo padrão RBAC já aplicado a Leads/Visitas/Imóveis.
+     * owner/admin/editor/viewer mantêm acesso total à agência.
+     */
+    private void assertAdvertiserAccess(UUID conversationId, UUID advertiserId, UUID requestorUserId,
+                                         DomainException deniedException) {
+        var role = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(String.class).optional().orElse(null);
+        if (!"sales".equals(role)) return;
+
+        var owned = jdbc.sql("""
+                SELECT 1 FROM properia.chat_conversations c
+                LEFT JOIN properia.leads ld ON ld.id = c.lead_id
+                LEFT JOIN properia.listings li ON li.id = c.listing_id
+                WHERE c.id = :id AND c.advertiser_id = :adv
+                  AND (ld.assigned_to = :uid OR li.owner_user_id = :uid)
+                """).param("id", conversationId).param("adv", advertiserId).param("uid", requestorUserId)
+            .query(Integer.class).optional().isPresent();
+        if (!owned) throw deniedException;
     }
 
     // ── Buyer side ─────────────────────────────────────────────────────────────
@@ -133,7 +174,8 @@ public class ChatService {
 
         if (existing.isPresent()) {
             var conv = existing.get();
-            var messages = messageRepo.findByConversationIdOrderByCreatedAtAsc(conv.getId())
+            // Comprador nunca vê notas internas da equipa.
+            var messages = messageRepo.findByConversationIdAndIsInternalFalseOrderByCreatedAtAsc(conv.getId())
                 .stream().map(this::toMessageDto).toList();
             return toDto(conv, messages);
         }
@@ -247,7 +289,7 @@ public class ChatService {
     private MessageDto toMessageDto(ChatMessage m) {
         return new MessageDto(
             m.getId(), m.getConversationId(), m.getSenderType(), m.getSenderUserId(),
-            m.getMessageType(), m.getBody(), m.getCreatedAt()
+            m.getMessageType(), m.getBody(), m.getCreatedAt(), m.isInternal()
         );
     }
 }

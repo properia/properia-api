@@ -94,7 +94,7 @@ public class BuyerChatController {
                 SELECT id::text, conversation_id::text, sender_type::text,
                        sender_user_id::text, message_type::text, body, created_at
                 FROM properia.chat_messages
-                WHERE conversation_id = :id
+                WHERE conversation_id = :id AND is_internal = false
                 ORDER BY created_at ASC
                 """)
             .param("id", id)
@@ -168,6 +168,7 @@ public class BuyerChatController {
                             SELECT COUNT(*) FROM properia.chat_messages m
                             WHERE m.conversation_id = c.id
                               AND m.sender_type::text = 'advertiser_member'
+                              AND m.is_internal = false
                               AND m.created_at > COALESCE(
                                   (SELECT MAX(m2.created_at) FROM properia.chat_messages m2
                                    WHERE m2.conversation_id = c.id
