@@ -113,9 +113,12 @@ public class AdvertiserChatController {
                     c.last_message_at, c.last_message_preview, c.closed_at,
                     c.created_at, c.updated_at,
                     u.full_name AS buyer_name, u.avatar_url AS buyer_avatar,
+                    u.email AS buyer_email, u.phone AS buyer_phone,
                     li.id::text AS l_id, li.public_id AS l_public_id, li.title AS l_title,
                     li.business_type::text AS l_business_type,
                     li.city AS l_city, li.district AS l_district,
+                    li.hero_image_url AS l_hero_image_url, li.price_amount AS l_price_amount,
+                    li.price_currency AS l_price_currency, li.bedrooms AS l_bedrooms,
                     assignee.id::text AS assigned_to_user_id, assignee.full_name AS assigned_to_name,
                     (COALESCE(ld.assigned_to, li.owner_user_id) = :me) AS is_mine,
                     """ + UNREAD_COUNT_SQL + """
@@ -148,9 +151,12 @@ public class AdvertiserChatController {
                     c.last_message_at, c.last_message_preview, c.closed_at,
                     c.created_at, c.updated_at,
                     u.full_name AS buyer_name, u.avatar_url AS buyer_avatar,
+                    u.email AS buyer_email, u.phone AS buyer_phone,
                     li.id::text AS l_id, li.public_id AS l_public_id, li.title AS l_title,
                     li.business_type::text AS l_business_type,
                     li.city AS l_city, li.district AS l_district,
+                    li.hero_image_url AS l_hero_image_url, li.price_amount AS l_price_amount,
+                    li.price_currency AS l_price_currency, li.bedrooms AS l_bedrooms,
                     assignee.id::text AS assigned_to_user_id, assignee.full_name AS assigned_to_name,
                     (COALESCE(ld.assigned_to, li.owner_user_id) = :me) AS is_mine,
                     0 AS unread_count
@@ -335,6 +341,8 @@ public class AdvertiserChatController {
         counterpart.put("name", Objects.requireNonNullElse(rs.getString("buyer_name"), "Comprador"));
         counterpart.put("roleLabel", "Comprador");
         counterpart.put("avatarUrl", rs.getString("buyer_avatar"));
+        counterpart.put("email", rs.getString("buyer_email"));
+        counterpart.put("phone", rs.getString("buyer_phone"));
 
         var listing = new LinkedHashMap<String, Object>();
         listing.put("id", rs.getString("l_id"));
@@ -343,6 +351,12 @@ public class AdvertiserChatController {
         listing.put("businessType", Objects.requireNonNullElse(rs.getString("l_business_type"), "sale"));
         listing.put("city", rs.getString("l_city"));
         listing.put("district", rs.getString("l_district"));
+        listing.put("heroImageUrl", rs.getString("l_hero_image_url"));
+        var priceAmount = rs.getBigDecimal("l_price_amount");
+        listing.put("priceAmount", priceAmount != null ? priceAmount.toPlainString() : null);
+        listing.put("priceCurrency", rs.getString("l_price_currency"));
+        var bedrooms = rs.getObject("l_bedrooms");
+        listing.put("bedrooms", bedrooms != null ? rs.getInt("l_bedrooms") : null);
 
         var row = new LinkedHashMap<String, Object>();
         row.put("id", rs.getString("id"));
