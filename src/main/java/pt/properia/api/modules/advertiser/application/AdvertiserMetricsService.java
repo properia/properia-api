@@ -22,6 +22,20 @@ public class AdvertiserMetricsService {
     public record SourceBreakdownItem(String source, int total) {}
     public record CloseReasonItem(String reason, int total) {}
 
+    public record DossierGroupStatsDto(
+        double responseRate, double visitCreatedRate, double visitConfirmedRate, double advancedStageRate
+    ) {
+        static final DossierGroupStatsDto EMPTY = new DossierGroupStatsDto(0, 0, 0, 0);
+    }
+
+    public record DecisionDossierImpactDto(
+        int leadsWithDossier, int leadsWithoutDossier, double shareRate,
+        DossierGroupStatsDto withDossier, DossierGroupStatsDto withoutDossier
+    ) {
+        static final DecisionDossierImpactDto EMPTY =
+            new DecisionDossierImpactDto(0, 0, 0, DossierGroupStatsDto.EMPTY, DossierGroupStatsDto.EMPTY);
+    }
+
     public record MetricsDto(
         int leadsTotal, int leadsFresh, int leadsLate, int leadsUnread,
         int visitsRequested, int visitsConfirmed,
@@ -29,7 +43,8 @@ public class AdvertiserMetricsService {
         double responseRate, Integer avgFirstResponseMinutes,
         Map<String, Object> funnel, CohortDto cohort, FinancialDto financial,
         List<SourceBreakdownItem> sourceBreakdown,
-        List<Object> closeReasons
+        List<Object> closeReasons,
+        DecisionDossierImpactDto decisionDossierImpact
     ) {}
 
     // Isolamento por consultor: quando não-nulo, restringe a leads atribuídos a este
@@ -203,6 +218,8 @@ public class AdvertiserMetricsService {
         // computed via the shared helper and just scaled differently per contract.
         double responseRate = Math.round(computeResponseFraction(advertiserId, d30, scopeUserId) * 1000) / 10.0;
 
+        var decisionDossierImpact = computeDecisionDossierImpact(advertiserId, srcParam, scopeUserId);
+
         return new MetricsDto(
             total, today, (int) leadRows.stream().filter(r -> {
                 var age = ChronoUnit.HOURS.between((Instant) r[2], Instant.now());
@@ -217,7 +234,76 @@ public class AdvertiserMetricsService {
             new CohortDto(today, last7, last30),
             new FinancialDto(pipelineValue, proposalValue, wonValue, avgProposalValue, proposalToWinRate),
             breakdown,
-            closeReasons
+            closeReasons,
+            decisionDossierImpact
+        );
+    }
+
+    /**
+     * Impacto do Dossier de Decisão: compara leads cujo comprador partilhou um
+     * dossier (properia.decision_dossiers, share_with_advertiser = true) para o
+     * mesmo imóvel, contra os restantes. Junta-se por (listing_id, user_id) porque
+     * o dossier não tem lead_id próprio — é criado do lado do comprador antes (ou
+     * independentemente) de o lead existir.
+     * Respeita o mesmo scopeUserId/source de getMetrics() (sales só vê o impacto
+     * dentro da sua própria carteira, nunca dossiers partilhados sobre leads de
+     * colegas).
+     */
+    private record DossierLeadRow(String stage, boolean hasVisit, boolean hasConfirmedVisit, boolean hasDossier) {}
+
+    private DecisionDossierImpactDto computeDecisionDossierImpact(UUID advertiserId, String source, UUID scopeUserId) {
+        var rows = jdbc.sql("""
+                SELECT l.stage::text AS stage,
+                       EXISTS (SELECT 1 FROM properia.visits v WHERE v.lead_id = l.id) AS has_visit,
+                       EXISTS (
+                           SELECT 1 FROM properia.visits v
+                           WHERE v.lead_id = l.id AND v.status::text IN ('confirmed', 'completed')
+                       ) AS has_confirmed_visit,
+                       EXISTS (
+                           SELECT 1 FROM properia.decision_dossiers dd
+                           WHERE dd.listing_id = l.listing_id
+                             AND dd.user_id = l.user_id
+                             AND dd.share_with_advertiser = true
+                       ) AS has_dossier
+                FROM properia.leads l
+                WHERE l.advertiser_id = :adv
+                  AND (CAST(:source AS text) IS NULL OR l.source::text = :source)
+                """ + LEAD_SCOPE_SQL)
+            .param("adv", advertiserId).param("source", source).param("scopeUserId", scopeUserId)
+            .query((rs, n) -> new DossierLeadRow(
+                rs.getString("stage"), rs.getBoolean("has_visit"),
+                rs.getBoolean("has_confirmed_visit"), rs.getBoolean("has_dossier")
+            ))
+            .list();
+
+        if (rows.isEmpty()) return DecisionDossierImpactDto.EMPTY;
+
+        var withDossier = rows.stream().filter(DossierLeadRow::hasDossier).toList();
+        var withoutDossier = rows.stream().filter(r -> !r.hasDossier()).toList();
+        double shareRate = Math.round((double) withDossier.size() / rows.size() * 1000) / 10.0;
+
+        return new DecisionDossierImpactDto(
+            withDossier.size(), withoutDossier.size(), shareRate,
+            dossierGroupStats(withDossier), dossierGroupStats(withoutDossier)
+        );
+    }
+
+    // "Avançou no funil" = saiu do início do ciclo (qualificação em diante) —
+    // mesmas etapas que LeadController.LEAD_SCORE trata como sinal de progresso real.
+    private static final Set<String> ADVANCED_STAGES = Set.of("qualified", "proposal", "won");
+
+    private DossierGroupStatsDto dossierGroupStats(List<DossierLeadRow> rows) {
+        if (rows.isEmpty()) return DossierGroupStatsDto.EMPTY;
+        int n = rows.size();
+        long responded = rows.stream().filter(r -> !"new".equals(r.stage()) && !"lost".equals(r.stage())).count();
+        long visitCreated = rows.stream().filter(DossierLeadRow::hasVisit).count();
+        long visitConfirmed = rows.stream().filter(DossierLeadRow::hasConfirmedVisit).count();
+        long advanced = rows.stream().filter(r -> ADVANCED_STAGES.contains(r.stage())).count();
+        return new DossierGroupStatsDto(
+            Math.round((double) responded / n * 1000) / 10.0,
+            Math.round((double) visitCreated / n * 1000) / 10.0,
+            Math.round((double) visitConfirmed / n * 1000) / 10.0,
+            Math.round((double) advanced / n * 1000) / 10.0
         );
     }
 
