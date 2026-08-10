@@ -353,13 +353,17 @@ public class AdvertiserMiscController {
 
         // Log CRM audit event
         try {
+            // A coluna é lead_id (e visit_id para visitas) — "entity_id" nunca existiu nesta
+            // tabela. Como o INSERT vive dentro de um catch silencioso, falhava em TODAS as
+            // gravações sem deixar rasto: a trilha de auditoria do CRM (/admin/auditoria)
+            // estava vazia em produção apesar de haver atividade.
             jdbc.sql("""
                     INSERT INTO properia.crm_audit_events (id, advertiser_id, actor_user_id, action,
-                      entity_type, entity_id, payload, created_at)
-                    VALUES (:id, :adv, :uid, 'commercial_response_logged', 'lead', :eid, :payload::jsonb, now())
+                      entity_type, lead_id, payload, created_at)
+                    VALUES (:id, :adv, :uid, 'commercial_response_logged', 'lead', :lid, :payload::jsonb, now())
                     """)
                 .param("id", UUID.randomUUID()).param("adv", advertiserId).param("uid", claims.userId())
-                .param("eid", id.toString())
+                .param("lid", id)
                 .param("payload", toJson(Map.of("responseType", responseType, "outcome", outcome != null ? outcome : "")))
                 .update();
         } catch (Exception ignored) {}

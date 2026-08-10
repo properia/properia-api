@@ -46,7 +46,20 @@ public class UpdateLeadStageUseCase {
         this.jdbc = jdbc;
     }
 
-    public record Command(UUID leadId, UUID advertiserId, String stage, UUID assignedTo, String closeReason) {}
+    /**
+     * @param autoClaimUserId quando não-nulo, o lead é reivindicado por este utilizador se
+     *        estiver na fila geral (assigned_to NULL) e a etapa mudar — ver auto-claim em
+     *        execute(). O chamador (LeadController) só o preenche para papéis operacionais
+     *        que trabalham a fila; owner/admin fazem triagem sem tomar posse.
+     */
+    public record Command(UUID leadId, UUID advertiserId, String stage, UUID assignedTo,
+                          String closeReason, UUID autoClaimUserId) {
+
+        /** Overload para chamadores que não participam no auto-claim. */
+        public Command(UUID leadId, UUID advertiserId, String stage, UUID assignedTo, String closeReason) {
+            this(leadId, advertiserId, stage, assignedTo, closeReason, null);
+        }
+    }
 
     public Lead execute(Command cmd) {
         var lead = leadRepo.findByIdAndAdvertiserId(cmd.leadId(), cmd.advertiserId())
@@ -89,11 +102,31 @@ public class UpdateLeadStageUseCase {
         if (cmd.assignedTo() != null) {
             lead.setAssignedTo(cmd.assignedTo());
         }
+
+        // ── Auto-claim ("first to claim") ────────────────────────────────────────
+        // Um lead sem responsável (assigned_to NULL) está na fila geral/pool de SDR.
+        // Quem lhe mexer na etapa passa a ser o responsável — evita que leads
+        // trabalhados fiquem eternamente sem dono e que dois consultores lhes peguem
+        // ao mesmo tempo. Só se aplica quando ninguém foi explicitamente indicado no
+        // pedido (cmd.assignedTo() == null): uma reatribuição manual manda sempre.
+        boolean autoClaimed = changingStage
+            && cmd.assignedTo() == null
+            && cmd.autoClaimUserId() != null
+            && lead.getAssignedTo() == null;
+        if (autoClaimed) {
+            lead.setAssignedTo(cmd.autoClaimUserId());
+            lead.setMetadata(appendAutoClaimEvent(lead.getMetadata()));
+        }
+
         if (cmd.closeReason() != null) {
             lead.setMetadata(mergeCloseReason(lead.getMetadata(), cmd.closeReason()));
         }
 
         var saved = leadRepo.save(lead);
+
+        if (autoClaimed) {
+            writeAutoClaimAudit(cmd.advertiserId(), cmd.autoClaimUserId(), cmd.leadId(), cmd.stage());
+        }
 
         // Fechar o lead (won/lost) encerra a conversa de chat associada: o comprador
         // deixa de poder enviar mensagens e o ciclo fica fechado de ambos os lados.
@@ -134,6 +167,55 @@ public class UpdateLeadStageUseCase {
             return objectMapper.writeValueAsString(parsed);
         } catch (Exception e) {
             return metadataJson;
+        }
+    }
+
+    /** Evento visível na timeline do lead (advertiser-leads-page.tsx) — o consultor vê que ficou responsável. */
+    @SuppressWarnings("unchecked")
+    private String appendAutoClaimEvent(String metadataJson) {
+        try {
+            var parsed = metadataJson != null && !metadataJson.isBlank()
+                ? new LinkedHashMap<String, Object>(objectMapper.readValue(metadataJson, Map.class))
+                : new LinkedHashMap<String, Object>();
+
+            var events = new ArrayList<Object>();
+            if (parsed.get("events") instanceof List<?> existing) events.addAll(existing);
+
+            var event = new LinkedHashMap<String, Object>();
+            event.put("id", "claim-" + UUID.randomUUID());
+            event.put("type", "note");
+            event.put("title", "Lead reivindicado");
+            event.put("description", "Ficou responsável por este lead ao alterar a etapa (estava na fila geral).");
+            event.put("createdAt", Instant.now().toString());
+            events.add(event);
+
+            parsed.put("events", events);
+            return objectMapper.writeValueAsString(parsed);
+        } catch (Exception e) {
+            return metadataJson;
+        }
+    }
+
+    /**
+     * Trilha de auditoria do CRM (properia.crm_audit_events, exposta em /admin/auditoria).
+     * Best-effort: uma falha aqui nunca deve impedir a mudança de etapa.
+     */
+    private void writeAutoClaimAudit(UUID advertiserId, UUID actorUserId, UUID leadId, String stage) {
+        try {
+            jdbc.sql("""
+                    INSERT INTO properia.crm_audit_events
+                      (advertiser_id, actor_user_id, entity_type, lead_id, action, payload)
+                    VALUES (:adv, :uid, 'lead', :lid, 'lead_auto_claimed', :payload::jsonb)
+                    """)
+                .param("adv", advertiserId)
+                .param("uid", actorUserId)
+                .param("lid", leadId)
+                .param("payload", objectMapper.writeValueAsString(Map.of(
+                    "reason", "stage_change_on_unassigned_lead",
+                    "stage", stage != null ? stage : "")))
+                .update();
+        } catch (Exception e) {
+            // Auditoria é secundária — não falhar a operação principal por causa dela.
         }
     }
 

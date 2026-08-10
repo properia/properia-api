@@ -488,13 +488,14 @@ public class LeadController {
             @RequestBody Map<String, Object> body) {
 
         var advertiserId = requireAdvertiserId(claims);
-        requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
+        var role = requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
 
         var stage = (String) body.get("stage");
         var assignedToRaw = body.get("assignedTo");
         UUID assignedTo = assignedToRaw != null ? UUID.fromString(assignedToRaw.toString()) : null;
 
-        updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, assignedTo, null));
+        updateLeadStage.execute(new UpdateLeadStageUseCase.Command(
+            id, advertiserId, stage, assignedTo, null, autoClaimUserIdFor(role, claims.userId())));
         return ResponseEntity.ok(Map.of("data", Map.of("updated", true)));
     }
 
@@ -512,8 +513,9 @@ public class LeadController {
         // Reatribuir ou mudar de etapa um lead de outro consultor exige owner/admin —
         // ver requireCanModifyAssignmentOrStage. Notas, proposta e dados de contacto
         // continuam abertos a toda a equipa (não é isso que este gate protege).
+        String requestorRole = null;
         if (body.containsKey("stage") || body.containsKey("assignedToUserId")) {
-            requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
+            requestorRole = requireCanModifyAssignmentOrStage(advertiserId, claims.userId(), id);
         }
 
         // Mudança de etapa e/ou motivo de desfecho passam pelo use case, que aplica
@@ -521,7 +523,13 @@ public class LeadController {
         if (body.containsKey("stage") || body.containsKey("closeReason")) {
             var stage = body.containsKey("stage") ? (String) body.get("stage") : null;
             var closeReason = body.containsKey("closeReason") ? (String) body.get("closeReason") : null;
-            updateLeadStage.execute(new UpdateLeadStageUseCase.Command(id, advertiserId, stage, null, closeReason));
+            // Se o mesmo PATCH também traz assignedToUserId, esse é aplicado abaixo e manda
+            // sobre o auto-claim — por isso não reivindica aqui.
+            var autoClaim = body.containsKey("assignedToUserId")
+                ? null
+                : autoClaimUserIdFor(requestorRole, claims.userId());
+            updateLeadStage.execute(new UpdateLeadStageUseCase.Command(
+                id, advertiserId, stage, null, closeReason, autoClaim));
             stageOrCloseReasonHandled = true;
         }
 
@@ -718,14 +726,34 @@ public class LeadController {
 
     private static final java.util.Set<String> ROLES_ALLOWED_TO_MODIFY_ANY_LEAD = java.util.Set.of("owner", "admin");
 
+    /** Papéis operacionais que "trabalham a fila" e por isso reivindicam o lead ao mexer-lhe. */
+    private static final java.util.Set<String> ROLES_THAT_AUTO_CLAIM = java.util.Set.of("sales");
+
     /**
-     * Reatribuir ou mudar o estágio de um lead alheio exige owner/admin. Um membro
-     * sales/editor/viewer só pode fazê-lo em leads que já lhe estão atribuídos (ou
-     * ainda por atribuir — bloquear isso impediria qualquer consultor de "pegar" num
-     * lead novo). Mesma UI já restringia isto (advertiser-leads-page.tsx); faltava
-     * a validação aqui, no servidor.
+     * Auto-claim só para quem trabalha a fila (sales). owner/admin fazem triagem e
+     * acompanhamento sobre leads de toda a agência — atribuí-los automaticamente a si
+     * próprios ao mudar uma etapa roubaria leads à equipa sem intenção nenhuma.
      */
-    private void requireCanModifyAssignmentOrStage(UUID advertiserId, UUID requestorUserId, UUID leadId) {
+    private UUID autoClaimUserIdFor(String requestorRole, UUID requestorUserId) {
+        return ROLES_THAT_AUTO_CLAIM.contains(requestorRole) ? requestorUserId : null;
+    }
+
+    /**
+     * Quem pode reatribuir ou mudar o estágio de um lead:
+     *   - owner/admin                          → qualquer lead da agência;
+     *   - o consultor atribuído (assigned_to)  → o seu lead;
+     *   - o angariador do imóvel (owner_user_id) → leads gerados no imóvel dele, mesmo
+     *     que o lead ainda não lhe esteja atribuído (são campos independentes: atribuir
+     *     um imóvel NÃO atribui os leads que ele gera);
+     *   - qualquer membro da agência           → leads ainda por atribuir (assigned_to
+     *     NULL), que formam a fila geral / pool de SDR. Deliberado: bloquear isto
+     *     impediria "pegar" num lead novo. Quem lhe mexe na etapa reivindica-o
+     *     automaticamente (ver auto-claim em UpdateLeadStageUseCase).
+     *
+     * Devolve o papel do requerente, para o chamador decidir sobre auto-claim sem
+     * repetir a query.
+     */
+    private String requireCanModifyAssignmentOrStage(UUID advertiserId, UUID requestorUserId, UUID leadId) {
         var requestorRole = jdbc.sql("""
                 SELECT membership_role FROM properia.advertiser_users
                 WHERE advertiser_id = :adv AND user_id = :uid
@@ -733,17 +761,36 @@ public class LeadController {
             .query(String.class).optional()
             .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão para este lead.", 403));
 
-        if (ROLES_ALLOWED_TO_MODIFY_ANY_LEAD.contains(requestorRole)) return;
+        if (ROLES_ALLOWED_TO_MODIFY_ANY_LEAD.contains(requestorRole)) return requestorRole;
 
-        var assignedTo = jdbc.sql("SELECT assigned_to FROM properia.leads WHERE id = :id AND advertiser_id = :adv")
+        var lead = jdbc.sql("""
+                SELECT l.assigned_to, li.owner_user_id
+                FROM properia.leads l
+                LEFT JOIN properia.listings li ON li.id = l.listing_id
+                WHERE l.id = :id AND l.advertiser_id = :adv
+                """)
             .param("id", leadId).param("adv", advertiserId)
-            .query(UUID.class).optional()
+            .query((rs, n) -> {
+                var m = new LinkedHashMap<String, Object>();
+                m.put("assignedTo", rs.getString("assigned_to"));
+                m.put("listingOwner", rs.getString("owner_user_id"));
+                return m;
+            })
+            .optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
 
-        if (assignedTo != null && !assignedTo.equals(requestorUserId)) {
-            throw new DomainException("FORBIDDEN",
-                "Este lead está atribuído a outro consultor. Só owner ou admin podem reatribuí-lo ou mudar o seu estágio.", 403);
-        }
+        var assignedTo = (String) lead.get("assignedTo");
+        var listingOwner = (String) lead.get("listingOwner");
+        var selfId = requestorUserId.toString();
+
+        boolean unassigned = assignedTo == null;              // fila geral — livre para quem pegar
+        boolean isAssignee = selfId.equals(assignedTo);
+        boolean isListingOwner = selfId.equals(listingOwner);
+
+        if (unassigned || isAssignee || isListingOwner) return requestorRole;
+
+        throw new DomainException("FORBIDDEN",
+            "Este lead está atribuído a outro consultor. Só owner ou admin podem reatribuí-lo ou mudar o seu estágio.", 403);
     }
 
     // Sales só vê os seus próprios dados (leads/visitas); owner/admin/editor veem
