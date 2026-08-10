@@ -137,11 +137,19 @@ public class LeadController {
             whereParts.add("l.source::text = :source");
             params.put("source", source);
         }
-        // Sales só vê os próprios leads — força o filtro por assigned_to = eu,
-        // ignorando qualquer assignedToUserId enviado pelo cliente (não confiar
-        // no filtro opcional da UI para isolar dados de outros consultores).
+        // Sales só vê os próprios leads — força o filtro, ignorando qualquer
+        // assignedToUserId enviado pelo cliente (não confiar no filtro opcional da UI
+        // para isolar dados de outros consultores).
+        //
+        // "Próprios" inclui os leads dos imóveis de que é responsável (li.owner_user_id),
+        // não só os que lhe estão atribuídos diretamente (l.assigned_to): atribuir um
+        // imóvel a alguém NÃO atribui os leads gerados nesse imóvel — são dois campos
+        // independentes. Sem o fallback, um consultor com imóvel atribuído via a visita
+        // na agenda (VisitController já tinha este OR) mas o lead correspondente
+        // desaparecia da lista, e o Dashboard contava-o (AdvertiserMetricsService.
+        // LEAD_SCOPE_SQL também já tinha) — KPI a dizer "1 lead" sobre uma lista vazia.
         if (isScopedToSelf(advertiserId, claims.userId())) {
-            whereParts.add("l.assigned_to = :assignedTo::uuid");
+            whereParts.add("(l.assigned_to = :assignedTo::uuid OR li.owner_user_id = :assignedTo::uuid)");
             params.put("assignedTo", claims.userId().toString());
         } else if (assignedToUserId != null && !assignedToUserId.isBlank()) {
             whereParts.add("l.assigned_to = :assignedTo::uuid");
@@ -566,7 +574,8 @@ public class LeadController {
         var advertiserId = requireAdvertiserId(claims);
         boolean leadsUnlockedByPlan = billingService.hasLeadsUnlockedByPlan(advertiserId);
         var lead = jdbc.sql("""
-                SELECT l.*, li.title as listing_title, li.hero_image_url as listing_hero_image
+                SELECT l.*, li.title as listing_title, li.hero_image_url as listing_hero_image,
+                       li.owner_user_id AS listing_owner_user_id
                 FROM properia.leads l
                 LEFT JOIN properia.listings li ON li.id = l.listing_id
                 WHERE l.id = :id AND l.advertiser_id = :adv
@@ -586,16 +595,23 @@ public class LeadController {
                 m.put("source", rs.getString("source"));
                 m.put("internalNotes", null);
                 m.put("assignedToUserId", rs.getString("assigned_to"));
+                m.put("listingOwnerUserId", rs.getString("listing_owner_user_id"));
                 m.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
                 m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
                 return (Map<String, Object>) m;
             }).optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Lead não encontrado.", 404));
 
-        if (isScopedToSelf(advertiserId, claims.userId())
-                && !claims.userId().toString().equals(lead.get("assignedToUserId"))) {
+        // Mesmo critério da listagem: "meu" = atribuído a mim OU de um imóvel meu.
+        // Sem o segundo caso, abrir um lead que aparece na lista dava 404.
+        var selfId = claims.userId().toString();
+        boolean isOwnLead = selfId.equals(lead.get("assignedToUserId"))
+            || selfId.equals(lead.get("listingOwnerUserId"));
+        if (isScopedToSelf(advertiserId, claims.userId()) && !isOwnLead) {
             throw new DomainException("NOT_FOUND", "Lead não encontrado.", 404);
         }
+        // Campo interno de autorização — não faz parte do contrato do FE.
+        lead.remove("listingOwnerUserId");
         return ResponseEntity.ok(Map.of("data", lead));
     }
 
