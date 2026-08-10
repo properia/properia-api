@@ -44,18 +44,36 @@ public class TeamService {
     public record MemberDto(UUID userId, String name, String email, String avatarUrl,
                             String membershipRole, Instant joinedAt, boolean isCurrentUser) {}
 
+    private static final Set<String> ROLES_ALLOWED_FULL_ROSTER = Set.of("owner", "admin");
+
     @Transactional(readOnly = true)
     public List<MemberDto> listMembers(UUID advertiserId, UUID currentUserId) {
-        return jdbc.sql("""
+        var requestorRole = jdbc.sql("""
+                SELECT membership_role FROM properia.advertiser_users
+                WHERE advertiser_id = :adv AND user_id = :uid
+                """).param("adv", advertiserId).param("uid", currentUserId)
+            .query(String.class).optional().orElse(null);
+
+        // "Gerir equipa" é exclusivo de owner/admin (ver PERMS_ROWS no frontend) —
+        // editor/sales/viewer não devem ver nomes/emails de colegas, só os seus
+        // próprios dados (necessário para o próprio front saber "quem sou eu" e
+        // o seu role, sem expor a lista completa da equipa).
+        var scopeClause = ROLES_ALLOWED_FULL_ROSTER.contains(requestorRole)
+            ? ""
+            : "AND au.user_id = :uid ";
+
+        var sql = jdbc.sql("""
                 SELECT au.user_id, u.full_name, u.email, u.avatar_url,
                        au.membership_role, au.created_at
                 FROM properia.advertiser_users au
                 JOIN properia.app_users u ON u.id = au.user_id
                 WHERE au.advertiser_id = :advertiserId
+                """ + scopeClause + """
                 ORDER BY au.created_at
                 """)
             .param("advertiserId", advertiserId)
-            .query((rs, n) -> new MemberDto(
+            .param("uid", currentUserId);
+        return sql.query((rs, n) -> new MemberDto(
                 UUID.fromString(rs.getString("user_id")),
                 rs.getString("full_name"),
                 rs.getString("email"),
