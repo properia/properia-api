@@ -71,6 +71,7 @@ public class AdvertiserMetricsService {
         // leads by stage, source, created_at, listing price
         var leadRows = jdbc.sql("""
                 SELECT l.id, l.stage, l.source, l.created_at,
+                       COALESCE(l.last_responded_at, l.created_at) AS sla_clock,
                        COALESCE(p.list_price, 0) AS price_amount
                 FROM properia.leads l
                 LEFT JOIN properia.listing_pricing p ON p.listing_id = l.listing_id
@@ -84,7 +85,10 @@ public class AdvertiserMetricsService {
                 rs.getString("stage"),
                 rs.getString("source"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getLong("price_amount")
+                rs.getLong("price_amount"),
+                // Relógio do SLA — separado de created_at, que continua a servir as
+                // coortes (hoje/7d/30d). Ver LeadController.slaBucket: mesmo critério.
+                rs.getTimestamp("sla_clock").toInstant()
             })
             .list();
 
@@ -176,6 +180,7 @@ public class AdvertiserMetricsService {
                         UNION ALL
                         SELECT lead_id, created_at FROM properia.chat_messages
                          WHERE advertiser_id = :adv AND sender_type::text = 'advertiser_member' AND lead_id IS NOT NULL
+                           AND is_internal = false
                     ) r
                     GROUP BY lead_id
                 ) fr ON fr.lead_id = l.id
@@ -224,7 +229,10 @@ public class AdvertiserMetricsService {
         return new MetricsDto(
             total, today, (int) leadRows.stream().filter(r -> {
                 var stg = (String) r[0];
-                var age = ChronoUnit.HOURS.between((Instant) r[2], Instant.now());
+                // Desde a última resposta (r[4]), não desde a criação: responder ao lead
+                // tem de o tirar de "fora do prazo" no KPI do Dashboard tal como na
+                // página de Leads.
+                var age = ChronoUnit.HOURS.between((Instant) r[4], Instant.now());
                 int lateThreshold = "proposal".equals(stg) ? slaHours.proposalHours() : slaHours.leadHours();
                 return age >= lateThreshold && !"won".equals(stg) && !"lost".equals(stg);
             }).count(),
@@ -536,20 +544,26 @@ public class AdvertiserMetricsService {
             .filter(e -> "confirmed".equals(e.getKey()) || "completed".equals(e.getKey()))
             .mapToInt(Map.Entry::getValue).sum();
 
-        // At-risk leads: sem seguimento > 72h (proposta usa o mesmo limiar). Alinhado com o bucket "late" da pagina de Leads para o CRM falar com um so numero.
+        // At-risk leads: sem resposta há mais do que o limiar da agência (proposta tem
+        // limiar próprio). Alinhado com o bucket "late" da página de Leads — mesmo
+        // relógio COALESCE(last_responded_at, created_at) — para o CRM falar com um só
+        // número. Antes usava l.updated_at, que só mexe quando a ETAPA avança: responder
+        // no chat a um lead já em 'qualified' não atualizava nada e ele ficava em risco
+        // para sempre.
         var atRiskRows = jdbc.sql("""
                 SELECT l.id::text, l.stage::text, l.contact_name,
-                       l.updated_at, li.title AS listing_title
+                       COALESCE(l.last_responded_at, l.created_at) AS sla_clock,
+                       li.title AS listing_title
                 FROM properia.leads l
                 JOIN properia.listings li ON li.id = l.listing_id
                 WHERE l.advertiser_id = :adv
                   AND l.stage::text NOT IN ('won','lost')
                   AND (
-                    (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
-                    OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
+                    (l.stage::text = 'proposal' AND COALESCE(l.last_responded_at, l.created_at) < :proposalCutoff)
+                    OR (l.stage::text != 'proposal' AND COALESCE(l.last_responded_at, l.created_at) < :slaCutoff)
                   )
                 """ + LEAD_SCOPE_SQL + """
-                ORDER BY l.updated_at ASC
+                ORDER BY COALESCE(l.last_responded_at, l.created_at) ASC
                 LIMIT 10
                 """)
             .param("adv", advertiserId)
@@ -557,7 +571,7 @@ public class AdvertiserMetricsService {
             .param("proposalCutoff", tsProposalCutoff)
             .param("scopeUserId", scopeUserId)
             .query((rs, n) -> {
-                var ts = rs.getTimestamp("updated_at");
+                var ts = rs.getTimestamp("sla_clock");
                 long days = ts != null ? ChronoUnit.DAYS.between(ts.toInstant(), now) : 0;
                 var stage = rs.getString("stage");
                 var row = new LinkedHashMap<String, Object>();
@@ -581,8 +595,8 @@ public class AdvertiserMetricsService {
                 WHERE l.advertiser_id = :adv
                   AND l.stage::text NOT IN ('won','lost')
                   AND (
-                    (l.stage::text = 'proposal' AND l.updated_at < :proposalCutoff)
-                    OR (l.stage::text != 'proposal' AND l.updated_at < :slaCutoff)
+                    (l.stage::text = 'proposal' AND COALESCE(l.last_responded_at, l.created_at) < :proposalCutoff)
+                    OR (l.stage::text != 'proposal' AND COALESCE(l.last_responded_at, l.created_at) < :slaCutoff)
                   )
                 """ + LEAD_SCOPE_SQL)
             .param("adv", advertiserId)
@@ -644,6 +658,7 @@ public class AdvertiserMetricsService {
                         UNION ALL
                         SELECT lead_id, created_at FROM properia.chat_messages
                          WHERE advertiser_id = :adv AND sender_type::text = 'advertiser_member' AND lead_id IS NOT NULL
+                           AND is_internal = false
                     ) r
                     GROUP BY lead_id
                 ) fr ON fr.lead_id = l.id

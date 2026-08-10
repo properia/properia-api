@@ -150,25 +150,33 @@ public class LeadController {
             params.put("dateTo", dateTo);
         }
         // ── slaBucket (TEMPO) vs priority (VALOR) — duas lentes distintas ──────────
-        // slaBucket deriva da IDADE (fresh/attention/late) → higiene de resposta
-        // ("estou a falhar no tempo"). Tem de ir para o WHERE em SQL — filtrar em
-        // memória DEPOIS do LIMIT/OFFSET desalinha total/totalPages.
+        // slaBucket mede o tempo DESDE A ÚLTIMA RESPOSTA da equipa (fresh/attention/
+        // late) → higiene de resposta ("estou a falhar no tempo"). Antes media a idade
+        // do lead (l.created_at), pelo que responder no chat nunca limpava "Fora do
+        // prazo": um lead de 3 dias ficava atrasado para sempre, mesmo com respostas
+        // enviadas. Agora o relógio reinicia a cada resposta real — leads.last_responded_at
+        // é mantido por trigger a partir do chat (mensagens não-internas) e de
+        // lead_responses (chamada/email registados). Sem resposta ainda → conta desde a
+        // criação, que é o comportamento correto para um lead novo por atender.
+        // Tem de ir para o WHERE em SQL — filtrar em memória DEPOIS do LIMIT/OFFSET
+        // desalinha total/totalPages.
         // Leads fechados (won/lost) não têm SLA pendente, por isso são excluídos.
         // O limiar de "late" é configurável por agência (properia.advertisers.settings):
         // leadFollowUpHours para a generalidade dos leads, proposalFollowUpHours para os
         // que já estão em proposta (avisos diferentes: "sem resposta" vs "sem avanço na
         // proposta"). "fresh" é 1/3 desse limiar — preserva a proporção original (24/72).
         final String activeOnly = " AND l.stage::text NOT IN ('won','lost')";
+        final String slaClock = "COALESCE(l.last_responded_at, l.created_at)";
         final String lateThresholdExpr =
             "make_interval(hours => CASE WHEN l.stage::text = 'proposal' THEN :proposalHours ELSE :leadHours END)";
         final String freshThresholdExpr =
             "make_interval(hours => (CASE WHEN l.stage::text = 'proposal' THEN :proposalHours ELSE :leadHours END) / 3)";
         if (slaBucket != null && !slaBucket.isBlank() && !"todas".equals(slaBucket)) {
             whereParts.add(switch (slaBucket) {
-                case "fresh" -> "l.created_at > now() - " + freshThresholdExpr + activeOnly;
-                case "attention" -> "l.created_at <= now() - " + freshThresholdExpr
-                    + " AND l.created_at > now() - " + lateThresholdExpr + activeOnly;
-                case "late" -> "l.created_at <= now() - " + lateThresholdExpr + activeOnly;
+                case "fresh" -> slaClock + " > now() - " + freshThresholdExpr + activeOnly;
+                case "attention" -> slaClock + " <= now() - " + freshThresholdExpr
+                    + " AND " + slaClock + " > now() - " + lateThresholdExpr + activeOnly;
+                case "late" -> slaClock + " <= now() - " + lateThresholdExpr + activeOnly;
                 default -> "true";
             });
         }
@@ -207,7 +215,7 @@ public class LeadController {
         var listSql = "SELECT l.id, l.listing_id, l.advertiser_id, l.source, l.stage,"
                 + " l.intent_type, l.message, l.contact_name, l.contact_email,"
                 + " l.contact_phone, l.contact_revealed_at, l.assigned_to, l.metadata,"
-                + " l.created_at, l.updated_at,"
+                + " l.created_at, l.updated_at, l.last_responded_at,"
                 + " li.id AS li_id, li.public_id AS li_public_id,"
                 + " li.title AS li_title, li.business_type AS li_business_type,"
                 + " li.status AS li_status, li.city AS li_city, li.district AS li_district,"
@@ -250,13 +258,18 @@ public class LeadController {
 
             var stg = rs.getString("stage");
 
-            // Compute slaBucket from age — limiar "late" configurável por agência
+            // slaBucket = tempo desde a última resposta da equipa (ou desde a criação,
+            // se ainda ninguém respondeu). Limiar "late" configurável por agência
             // (leadFollowUpHours / proposalFollowUpHours, ver fetchSlaHours()); "fresh"
-            // é 1/3 desse limiar, mesma proporção que o WHERE acima.
+            // é 1/3 desse limiar, mesma proporção que o WHERE acima — que tem de usar
+            // exatamente o mesmo relógio (COALESCE(last_responded_at, created_at)),
+            // senão o filtro "Fora do prazo" devolve leads que a lista mostra a verde.
             var createdAt = rs.getTimestamp("created_at").toInstant();
             m.put("createdAt", createdAt.toString());
             m.put("updatedAt", rs.getTimestamp("updated_at").toInstant().toString());
-            long ageHours = Duration.between(createdAt, now).toHours();
+            var lastRespondedTs = rs.getTimestamp("last_responded_at");
+            var slaClockFrom = lastRespondedTs != null ? lastRespondedTs.toInstant() : createdAt;
+            long ageHours = Duration.between(slaClockFrom, now).toHours();
             int lateHoursForStage = "proposal".equals(stg) ? slaHours.proposalHours() : slaHours.leadHours();
             int freshHoursForStage = Math.max(1, lateHoursForStage / 3);
             String bucket = ageHours < freshHoursForStage ? "fresh" : ageHours < lateHoursForStage ? "attention" : "late";
@@ -330,7 +343,7 @@ public class LeadController {
             var lastOutboundByLead = new HashMap<UUID, Instant>();
             var outboundCountByLead = new HashMap<UUID, Integer>();
             jdbc.sql("""
-                    SELECT lead_id, id, sender_type::text AS sender_type, body, created_at
+                    SELECT lead_id, id, sender_type::text AS sender_type, is_internal, body, created_at
                     FROM properia.chat_messages
                     WHERE lead_id IN (:ids)
                     ORDER BY created_at ASC
@@ -340,10 +353,16 @@ public class LeadController {
                     var leadId = UUID.fromString(rs.getString("lead_id"));
                     var senderType = rs.getString("sender_type");
                     var createdAt = rs.getTimestamp("created_at").toInstant();
+                    // Nota interna é para a equipa — o comprador nunca a vê, logo não é
+                    // resposta: não conta para responseCount/lastResponseAt nem para o SLA.
+                    // Antes entrava como "Resposta enviada" e dava um lead por respondido.
+                    var isInternalNote = rs.getBoolean("is_internal");
                     var direction = "buyer".equals(senderType) ? "inbound"
-                        : "advertiser_member".equals(senderType) ? "outbound" : "internal";
+                        : !"advertiser_member".equals(senderType) ? "internal"
+                        : isInternalNote ? "internal" : "outbound";
                     var title = "inbound".equals(direction) ? "Mensagem do comprador"
-                        : "outbound".equals(direction) ? "Resposta enviada" : "Mensagem de sistema";
+                        : "outbound".equals(direction) ? "Resposta enviada"
+                        : isInternalNote ? "Nota interna" : "Mensagem de sistema";
                     var entry = new LinkedHashMap<String, Object>();
                     entry.put("id", rs.getString("id"));
                     entry.put("direction", direction);
