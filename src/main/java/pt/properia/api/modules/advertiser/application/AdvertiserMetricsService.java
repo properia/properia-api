@@ -219,8 +219,9 @@ public class AdvertiserMetricsService {
         double proposalToWinRate = proposalsEverReached > 0 ? Math.round((double) won / proposalsEverReached * 1000) / 10.0 : 0;
 
         // CRM contract expresses responseRate as a 0–100 percentage (see AdvertiserMetricsResponse).
-        // Same underlying definition as Pulse's responseRate (leads that moved past 'new'/'lost'),
-        // computed via the shared helper and just scaled differently per contract.
+        // Same underlying definition as Pulse's responseRate (leads with last_responded_at
+        // IS NOT NULL, ver computeResponseFraction), computed via o helper partilhado e só
+        // escalado de forma diferente por contrato.
         double responseRate = Math.round(computeResponseFraction(advertiserId, d30, scopeUserId) * 1000) / 10.0;
 
         var decisionDossierImpact = computeDecisionDossierImpact(advertiserId, srcParam, scopeUserId);
@@ -336,9 +337,17 @@ public class AdvertiserMetricsService {
     }
 
     /**
-     * Fração (0–1) de leads criados desde {@code since} que já saíram do estado 'new'
-     * (i.e. tiveram alguma resposta/avanço) ou foram perdidos. Fonte única partilhada
-     * por getMetrics() (expõe como % 0–100) e getPulse() (expõe como fração 0–1).
+     * Fração (0–1) de leads criados desde {@code since} que já tiveram pelo menos uma
+     * resposta REAL da equipa (leads.last_responded_at IS NOT NULL — mantida por trigger
+     * a partir do chat e de lead_responses, ver V74__lead_last_responded_at.sql). Fonte
+     * única partilhada por getMetrics() (expõe como % 0–100) e getPulse() (fração 0–1).
+     *
+     * Antes usava stage NOT IN ('new','lost') como proxy de "respondido" — media avanço
+     * de etapa, não resposta. Um lead podia ser semeado/importado directo para 'qualified'
+     * sem qualquer mensagem ou chamada registada e ainda assim contar como respondido
+     * (caso real: Maria Santos, V72__seed_legacy_leads_visits_qa.sql, stage='qualified'
+     * sem uma única linha em chat_messages/lead_responses — inflava a Taxa de Resposta
+     * 30D para 100% com metade dos leads nunca contactados).
      */
     private double computeResponseFraction(UUID advertiserId, Instant since, UUID scopeUserId) {
         var ts = java.sql.Timestamp.from(since);
@@ -351,7 +360,7 @@ public class AdvertiserMetricsService {
         long respondedSince = jdbc.sql("""
                 SELECT COUNT(*) FROM properia.leads l
                 WHERE l.advertiser_id = :adv AND l.created_at > :since
-                  AND l.stage::text NOT IN ('new','lost')
+                  AND l.last_responded_at IS NOT NULL
                 """ + LEAD_SCOPE_SQL)
             .param("adv", advertiserId).param("since", ts).param("scopeUserId", scopeUserId)
             .query(Long.class).single();
