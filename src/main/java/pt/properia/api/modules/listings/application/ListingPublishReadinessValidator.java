@@ -55,7 +55,12 @@ public class ListingPublishReadinessValidator {
         }
         var description = listing.getDescriptionRaw() != null ? listing.getDescriptionRaw() : listing.getDescriptionShort();
         if (isBlank(description)) {
-            missing.add("descrição");
+            // Nomear os dois campos explicitamente: há dois campos parecidos no wizard
+            // ("Descrição do imóvel" e "Notas do anunciante") e um deles é anunciado na UI
+            // como opcional ("deixa em branco para IA gerar") — "falta descrição", sem mais,
+            // deixava o anunciante sem saber qual dos dois preencher, mesmo tendo escrito
+            // texto num dos dois.
+            missing.add("descrição (preenche \"Descrição do imóvel\" ou \"Notas do anunciante\")");
         }
         // Alojamento Local é obrigado por lei (DL 128/2014, na redação atual) a exibir o nº
         // de registo no RNAL em qualquer anúncio — sem ele o anúncio é ilegal. Ao contrário
