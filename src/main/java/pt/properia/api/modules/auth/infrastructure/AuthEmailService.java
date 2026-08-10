@@ -76,6 +76,21 @@ public class AuthEmailService {
         );
     }
 
+    /** Notifica o consultor/dono do imóvel de que uma visita foi agendada — nunca existiu antes. */
+    public void sendVisitScheduledToConsultant(String to, String listingTitle, String contactName, String whenLabel, String mode) {
+        String url = appUrl + "/anunciante/visitas";
+        String modeLabel = "online".equals(mode) ? "online" : "presencial";
+        send(to,
+            "Nova visita agendada — " + listingTitle,
+            html("Nova visita agendada",
+                "<strong>" + (contactName != null ? contactName : "Um comprador") + "</strong> agendou uma visita " + modeLabel +
+                " a <strong>" + listingTitle + "</strong>" +
+                (whenLabel != null && !whenLabel.isBlank() ? " para " + whenLabel : "") + ".",
+                "Ver visita", url),
+            "Nova visita a " + listingTitle + (whenLabel != null ? " (" + whenLabel + ")" : "") + ": " + url
+        );
+    }
+
     public void sendPasswordReset(String to, String token) {
         String url = appUrl + "/repor-palavra-passe?token=" + token;
         send(to,

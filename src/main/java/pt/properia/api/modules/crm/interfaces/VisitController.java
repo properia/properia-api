@@ -149,6 +149,10 @@ public class VisitController {
         // (forward-only; não regride leads já mais avançados nem fechados).
         leadStageAdvancer.advanceForward(leadId, advertiserId, "contacted");
 
+        // Nunca existiu nenhuma notificação ao consultor/dono do imóvel de que uma
+        // visita foi marcada — nem sequer para saber que alguém pediu uma.
+        notifyConsultantOfVisit(visit.getId());
+
         String finalStatus = conflict ? "waitlist" : visit.getStatus();
 
         return ResponseEntity.status(201).body(Map.of("data", Map.of(
@@ -156,6 +160,66 @@ public class VisitController {
             "visitId", visit.getId().toString(),
             "status", finalStatus
         )));
+    }
+
+    /**
+     * Notifica por email o consultor atribuído ao lead (ou, na falta desse, o dono do
+     * imóvel — mesmo fallback já usado na sincronização de calendário, ver
+     * UserCalendarSyncService) de que uma visita foi marcada. Best-effort: nunca falha o
+     * pedido/marcação da visita.
+     */
+    private void notifyConsultantOfVisit(UUID visitId) {
+        notifyConsultantOfVisit(visitId, null);
+    }
+
+    private void notifyConsultantOfVisit(UUID visitId, UUID excludeUserId) {
+        try {
+            var details = jdbc.sql("""
+                    SELECT COALESCE(l.assigned_to, li.owner_user_id) AS consultant_id,
+                           li.title AS listing_title, l.contact_name, v.starts_at, v.mode::text AS mode
+                    FROM properia.visits v
+                    LEFT JOIN properia.leads l ON l.id = v.lead_id
+                    LEFT JOIN properia.listings li ON li.id = v.listing_id
+                    WHERE v.id = :id
+                    """)
+                .param("id", visitId)
+                .query((rs, n) -> {
+                    var m = new java.util.LinkedHashMap<String, Object>();
+                    m.put("consultantId", rs.getString("consultant_id"));
+                    m.put("listingTitle", rs.getString("listing_title"));
+                    m.put("contactName", rs.getString("contact_name"));
+                    m.put("startsAt", rs.getTimestamp("starts_at"));
+                    m.put("mode", rs.getString("mode"));
+                    return m;
+                })
+                .optional().orElse(null);
+            if (details == null) return;
+
+            var consultantIdStr = (String) details.get("consultantId");
+            if (consultantIdStr == null) return; // lead sem consultor nem imóvel com dono — nada a notificar
+            var consultantId = UUID.fromString(consultantIdStr);
+            if (consultantId.equals(excludeUserId)) return; // não notificar quem marcou a própria visita
+
+            var consultantEmail = jdbc.sql("SELECT email FROM properia.app_users WHERE id = :id")
+                .param("id", consultantId)
+                .query(String.class).optional().orElse(null);
+            if (consultantEmail == null || consultantEmail.isBlank()) return;
+
+            var startsAt = details.get("startsAt") instanceof Timestamp ts ? ts.toInstant() : null;
+            var whenLabel = startsAt != null
+                ? DateTimeFormatter.ofPattern("d 'de' MMMM 'às' HH:mm", java.util.Locale.forLanguageTag("pt-PT"))
+                    .withZone(ZoneId.of("Europe/Lisbon")).format(startsAt)
+                : "";
+
+            emailService.sendVisitScheduledToConsultant(
+                consultantEmail,
+                Optional.ofNullable((String) details.get("listingTitle")).orElse("o imóvel"),
+                (String) details.get("contactName"),
+                whenLabel,
+                (String) details.get("mode"));
+        } catch (Exception e) {
+            log.warn("Could not send visit-scheduled email for visit {}: {}", visitId, e.getMessage());
+        }
     }
 
     @GetMapping("/api/visitas")
@@ -295,6 +359,9 @@ public class VisitController {
         // /confirm e o PATCH de status disparavam a sincronização com a agenda pessoal do
         // consultor — aqui nunca corria, mesmo já estando confirmada.
         userCalendarSync.syncVisitToConsultantCalendar(visit.getId());
+        // Só notifica se quem marcou não for o próprio consultor (ex.: o owner/team-lead
+        // marca em nome de outro colega) — evita mandar email a alguém sobre a própria ação.
+        notifyConsultantOfVisit(visit.getId(), claims.userId());
 
         var result = new java.util.LinkedHashMap<String, Object>();
         result.put("id", visit.getId().toString());
