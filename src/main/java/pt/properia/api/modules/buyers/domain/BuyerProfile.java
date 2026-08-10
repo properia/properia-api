@@ -101,6 +101,11 @@ public class BuyerProfile {
     @Transient
     private List<Map<String, Object>> matches;
 
+    // Top 3 fotos de matches, para a mini-barra de avatares sobrepostos no cartão da
+    // listagem — não confundir com `matches` (lista completa, só no detalhe).
+    @Transient
+    private List<Map<String, Object>> topMatchPreviews = List.of();
+
     public BuyerProfile() {}
 
     public UUID getId() { return id; }
@@ -131,6 +136,8 @@ public class BuyerProfile {
     public void setMatchCount(Integer matchCount) { this.matchCount = matchCount; }
     public List<Map<String, Object>> getMatches() { return matches; }
     public void setMatches(List<Map<String, Object>> matches) { this.matches = matches; }
+    public List<Map<String, Object>> getTopMatchPreviews() { return topMatchPreviews; }
+    public void setTopMatchPreviews(List<Map<String, Object>> topMatchPreviews) { this.topMatchPreviews = topMatchPreviews; }
 
     public void setId(UUID v) { this.id = v; }
     public void setAdvertiserId(UUID v) { this.advertiserId = v; }

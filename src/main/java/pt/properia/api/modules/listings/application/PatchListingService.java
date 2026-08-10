@@ -1,9 +1,12 @@
 package pt.properia.api.modules.listings.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import pt.properia.api.modules.buyers.application.BuyerService;
 import pt.properia.api.modules.zone.application.ZoneSnapshotService;
 import pt.properia.api.shared.domain.DomainException;
 
@@ -20,20 +23,32 @@ import java.util.UUID;
 @Transactional
 public class PatchListingService {
 
+    private static final Logger log = LoggerFactory.getLogger(PatchListingService.class);
+
     private final ListingRepository repository;
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final ZoneSnapshotService zoneSnapshotService;
     private final ListingPublishReadinessValidator readinessValidator;
+    private final BuyerService buyerService;
+
+    // Campos cuja alteração pode mudar a compatibilidade com critérios de compradores
+    // (ver BuyerService.score()) — usados para decidir se vale a pena recalcular matches.
+    private static final Set<String> MATCH_RELEVANT_FIELDS = Set.of(
+        "priceAmount", "bedrooms", "usableAreaM2", "propertyType", "businessType",
+        "city", "district", "parish", "neighborhood"
+    );
 
     public PatchListingService(ListingRepository repository, JdbcClient jdbc, ObjectMapper json,
                                 ZoneSnapshotService zoneSnapshotService,
-                                ListingPublishReadinessValidator readinessValidator) {
+                                ListingPublishReadinessValidator readinessValidator,
+                                BuyerService buyerService) {
         this.repository = repository;
         this.jdbc = jdbc;
         this.json = json;
         this.zoneSnapshotService = zoneSnapshotService;
         this.readinessValidator = readinessValidator;
+        this.buyerService = buyerService;
     }
 
     private static final Set<String> ROLES_ALLOWED_TO_REASSIGN = Set.of("owner", "admin");
@@ -196,6 +211,19 @@ public class PatchListingService {
         boolean nowPublished = "published".equals(saved.getStatus());
         boolean hasCoords    = saved.getLatitude() != null && saved.getLongitude() != null;
         boolean coordsOrStatusChanged = body.containsKey("status") || body.containsKey("latitude") || body.containsKey("longitude");
+
+        // Recalcula matches de compradores se este PATCH tornou o imóvel publicado agora
+        // mesmo (wantsToPublish) OU se já estava publicado e mexeu nalgum campo que muda
+        // compatibilidade (preço, localização, tipologia, área) — ver
+        // BuyerService.syncMatchesForAdvertiser. Nunca falha o PATCH: efeito secundário.
+        boolean matchRelevantChange = MATCH_RELEVANT_FIELDS.stream().anyMatch(body::containsKey);
+        if (nowPublished && (wantsToPublish || matchRelevantChange)) {
+            try {
+                buyerService.syncMatchesForAdvertiser(advertiserId);
+            } catch (Exception e) {
+                log.warn("Failed to sync buyer matches after patching listing {}: {}", saved.getId(), e.getMessage());
+            }
+        }
         if (nowPublished && hasCoords && coordsOrStatusChanged) {
             var locSnap = getLocationForZone(saved.getId());
             zoneSnapshotService.processAsync(

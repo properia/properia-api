@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import pt.properia.api.modules.buyers.application.BuyerService;
 import pt.properia.api.modules.listings.domain.Listing;
 import pt.properia.api.modules.zone.application.ZoneSnapshotService;
 import pt.properia.api.shared.domain.DomainException;
@@ -22,15 +23,18 @@ public class PublishListingUseCase {
     private final ZoneSnapshotService zoneSnapshotService;
     private final JdbcClient jdbc;
     private final ListingPublishReadinessValidator readinessValidator;
+    private final BuyerService buyerService;
 
     public PublishListingUseCase(ListingRepository repository,
                                   ZoneSnapshotService zoneSnapshotService,
                                   JdbcClient jdbc,
-                                  ListingPublishReadinessValidator readinessValidator) {
+                                  ListingPublishReadinessValidator readinessValidator,
+                                  BuyerService buyerService) {
         this.repository          = repository;
         this.zoneSnapshotService = zoneSnapshotService;
         this.jdbc                = jdbc;
         this.readinessValidator  = readinessValidator;
+        this.buyerService        = buyerService;
     }
 
     public record Command(UUID listingId, UUID advertiserId) {}
@@ -52,6 +56,16 @@ public class PublishListingUseCase {
         if (isFirstPublish) listing.setFirstPublishedAt(now);
 
         var saved = repository.save(listing);
+
+        // Recalcula matches de TODOS os compradores da agência — um imóvel novo tem de
+        // aparecer como compatível sem que ninguém precise de abrir cada comprador à mão
+        // (ver BuyerService.syncMatchesForAdvertiser). Nunca pode falhar a publicação: é um
+        // efeito secundário, não o objetivo do pedido.
+        try {
+            buyerService.syncMatchesForAdvertiser(cmd.advertiserId());
+        } catch (Exception e) {
+            log.warn("Failed to sync buyer matches after publishing listing {}: {}", saved.getId(), e.getMessage());
+        }
 
         // Coordenadas são obrigatórias para publicar (readinessValidator), por isso este bloco
         // corre sempre. Só saltamos o trigger se já existe um snapshot processado com sucesso —

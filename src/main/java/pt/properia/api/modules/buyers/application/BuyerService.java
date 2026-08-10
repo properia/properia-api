@@ -32,16 +32,81 @@ public class BuyerService {
 
     public record BuyerListResult(List<BuyerProfile> items, long total, int page, int pageSize, int totalPages) {}
 
+    // Limiares dos budget_bracket (euros), ordem ascendente — mesmo mapeamento do BUDGET_LABEL
+    // no frontend (buyer-list-page.tsx). Usado pelo filtro "orçamento mínimo": um bracket
+    // qualifica-se se o seu limite inferior for >= ao valor pedido.
+    private static final List<Map.Entry<String, Integer>> BUDGET_BRACKETS_ASC = List.of(
+        Map.entry("under_100k", 0), Map.entry("100_150k", 100_000), Map.entry("150_200k", 150_000),
+        Map.entry("200_250k", 200_000), Map.entry("250_300k", 250_000), Map.entry("300_400k", 300_000),
+        Map.entry("400_500k", 400_000), Map.entry("500_750k", 500_000), Map.entry("750k_1m", 750_000),
+        Map.entry("over_1m", 1_000_000)
+    );
+
     @Transactional(readOnly = true)
     public BuyerListResult listProfiles(UUID advertiserId, String status, UUID assignedToUserId,
-                                        String q, int page, int pageSize) {
+                                        String q, int page, int pageSize,
+                                        Boolean hasUnsentMatches, String consentStatus,
+                                        Integer minBudget, String propertyType) {
+        var eligibleIds = computeEligibleIds(advertiserId, hasUnsentMatches, consentStatus, minBudget, propertyType);
+        if (eligibleIds != null && eligibleIds.isEmpty()) {
+            return new BuyerListResult(List.of(), 0, page, pageSize, 0);
+        }
         var pageable = PageRequest.of(page, pageSize, Sort.by(Sort.Direction.DESC, "createdAt"));
-        var result = repo.search(advertiserId, status, assignedToUserId, q, pageable);
+        var result = repo.search(advertiserId, status, assignedToUserId, q, eligibleIds, pageable);
         var items = result.getContent();
         applyMatchCounts(advertiserId, items);
+        applyTopMatchPreviews(advertiserId, items);
         return new BuyerListResult(
             items, result.getTotalElements(), page, pageSize, result.getTotalPages()
         );
+    }
+
+    /**
+     * Filtros avançados (badge "Com imóveis compatíveis sem envio", consentimento, orçamento
+     * mínimo, tipo de imóvel) — expressos em SQL puro porque envolvem jsonb (criteria->
+     * propertyTypes) e EXISTS a buyer_listing_matches, que o JPQL do repositório não modela
+     * bem. Devolve null = sem restrição (não filtra); Set vazio = nenhum comprador qualifica.
+     */
+    private java.util.Set<UUID> computeEligibleIds(UUID advertiserId, Boolean hasUnsentMatches,
+                                                    String consentStatus, Integer minBudget, String propertyType) {
+        if (hasUnsentMatches == null && consentStatus == null && minBudget == null && propertyType == null) {
+            return null;
+        }
+        var whereParts = new ArrayList<String>();
+        var params = new LinkedHashMap<String, Object>();
+        whereParts.add("bp.advertiser_id = :adv");
+        params.put("adv", advertiserId);
+
+        if (Boolean.TRUE.equals(hasUnsentMatches)) {
+            whereParts.add("""
+                    EXISTS (
+                      SELECT 1 FROM properia.buyer_listing_matches m
+                      WHERE m.buyer_profile_id = bp.id AND m.status::text = 'new'
+                    )
+                    """);
+        }
+        if (consentStatus != null && !consentStatus.isBlank()) {
+            whereParts.add("bp.consent_status::text = :consentStatus");
+            params.put("consentStatus", consentStatus);
+        }
+        if (minBudget != null) {
+            var brackets = BUDGET_BRACKETS_ASC.stream()
+                .filter(e -> e.getValue() >= minBudget)
+                .map(Map.Entry::getKey)
+                .toList();
+            if (brackets.isEmpty()) return java.util.Set.of();
+            whereParts.add("bp.budget_bracket::text IN (:brackets)");
+            params.put("brackets", brackets);
+        }
+        if (propertyType != null && !propertyType.isBlank()) {
+            whereParts.add("bp.criteria->'propertyTypes' @> to_jsonb(:propertyType::text)");
+            params.put("propertyType", propertyType);
+        }
+
+        var sql = "SELECT bp.id FROM properia.buyer_profiles bp WHERE " + String.join(" AND ", whereParts);
+        var query = jdbc.sql(sql);
+        for (var e : params.entrySet()) query = query.param(e.getKey(), e.getValue());
+        return new java.util.HashSet<>(query.query(UUID.class).list());
     }
 
     private void applyMatchCounts(UUID advertiserId, List<BuyerProfile> items) {
@@ -54,6 +119,59 @@ public class BuyerService {
         for (var item : items) {
             item.setMatchCount(counts.getOrDefault(item.getId(), 0));
         }
+    }
+
+    /**
+     * Top 3 fotos por comprador para a mini-barra de avatares sobrepostos no cartão da
+     * listagem — uma única query com window function para a página inteira (evita N+1;
+     * o mesmo padrão de "buscar em lote depois do SELECT principal" já usado em
+     * LeadController.listForAdvertiser para conversation/responses).
+     */
+    private void applyTopMatchPreviews(UUID advertiserId, List<BuyerProfile> items) {
+        if (items.isEmpty()) return;
+        var ids = items.stream().map(BuyerProfile::getId).toList();
+        var byBuyer = new java.util.HashMap<UUID, List<Map<String, Object>>>();
+        jdbc.sql("""
+                SELECT buyer_profile_id, listing_id, hero_image_url, match_score
+                FROM (
+                  SELECT m.buyer_profile_id, m.listing_id, l.hero_image_url, m.match_score,
+                         ROW_NUMBER() OVER (PARTITION BY m.buyer_profile_id ORDER BY m.match_score DESC) AS rn
+                  FROM properia.buyer_listing_matches m
+                  JOIN properia.listings l ON l.id = m.listing_id
+                  WHERE m.advertiser_id = :adv AND m.buyer_profile_id IN (:ids)
+                ) ranked
+                WHERE rn <= 3
+                ORDER BY match_score DESC
+                """)
+            .param("adv", advertiserId)
+            .param("ids", ids)
+            .query((rs, n) -> {
+                var buyerId = rs.getObject("buyer_profile_id", UUID.class);
+                var preview = new LinkedHashMap<String, Object>();
+                preview.put("listingId", rs.getObject("listing_id", UUID.class));
+                preview.put("coverImageUrl", rs.getString("hero_image_url"));
+                preview.put("matchScore", rs.getInt("match_score"));
+                byBuyer.computeIfAbsent(buyerId, k -> new ArrayList<>()).add(preview);
+                return buyerId;
+            })
+            .list();
+        for (var item : items) {
+            item.setTopMatchPreviews(byBuyer.getOrDefault(item.getId(), List.of()));
+        }
+    }
+
+    /** Marca matches como "notified" depois de o agente usar "Sugerir Imóveis" — fecha o loop do filtro "sem envio". */
+    public void notifyMatches(UUID advertiserId, UUID buyerProfileId, List<UUID> listingIds) {
+        if (listingIds == null || listingIds.isEmpty()) return;
+        jdbc.sql("""
+                UPDATE properia.buyer_listing_matches
+                SET status = 'notified', updated_at = now()
+                WHERE advertiser_id = :adv AND buyer_profile_id = :bp AND listing_id IN (:listingIds)
+                """)
+            .param("adv", advertiserId)
+            .param("bp", buyerProfileId)
+            .param("listingIds", listingIds)
+            .update();
     }
 
     public BuyerProfile getProfile(UUID advertiserId, UUID id, UUID assignedToUserId) {
@@ -136,6 +254,20 @@ public class BuyerService {
 
     private static final int MATCH_MIN_SCORE = 55;
     private static final int MATCH_MAX = 12;
+
+    /**
+     * Recalcula os matches de TODOS os compradores ativos da agência — chamado quando um
+     * imóvel é publicado ou editado de forma que possa mudar a compatibilidade (preço,
+     * localização, tipologia, área). Antes disto, um imóvel novo só aparecia como
+     * compatível depois de alguém abrir manualmente o perfil de cada comprador; o contador
+     * "imóveis compatíveis" podia ficar desatualizado indefinidamente.
+     */
+    public void syncMatchesForAdvertiser(UUID advertiserId) {
+        var profiles = repo.findAllByAdvertiserIdAndStatus(advertiserId, "active");
+        for (var profile : profiles) {
+            syncMatches(advertiserId, profile);
+        }
+    }
 
     /** Recalcula e persiste os matches (upsert + remoção dos obsoletos), preservando o estado. */
     public void syncMatches(UUID advertiserId, BuyerProfile profile) {

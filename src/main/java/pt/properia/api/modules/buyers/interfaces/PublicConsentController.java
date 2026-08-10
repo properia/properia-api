@@ -63,9 +63,12 @@ public class PublicConsentController {
                                            @RequestBody Map<String, Object> body,
                                            HttpServletRequest request) {
         var ip = getClientIp(request);
+        // 'active' é o valor real do enum buyer_consent_status (pending/active/revoked/expired)
+        // — 'accepted' nunca existiu e rebentava com "invalid input value for enum" em toda
+        // aceitação de consentimento. O frontend (CONSENT_BADGE.active) já esperava 'active'.
         var updated = jdbc.sql("""
                 UPDATE properia.buyer_profiles
-                SET consent_status = 'accepted'::properia.buyer_consent_status,
+                SET consent_status = 'active'::properia.buyer_consent_status,
                     consent_accepted_at = now(),
                     consent_ip_address = :ip,
                     updated_at = now()

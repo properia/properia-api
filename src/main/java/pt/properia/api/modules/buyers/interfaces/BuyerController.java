@@ -30,12 +30,19 @@ public class BuyerController {
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int pageSize,
+            @RequestParam(required = false) Boolean hasUnsentMatches,
+            @RequestParam(required = false) String consentStatus,
+            @RequestParam(required = false) Integer minBudget,
+            @RequestParam(required = false) String propertyType,
             @AuthenticationPrincipal JwtClaims claims) {
         var ctx = resolveContext(claims);
         UUID assignedTo = assignedToUserId != null ? UUID.fromString(assignedToUserId) : ctx.scopedUserId;
         String statusFilter = (status == null || status.isBlank() || "todos".equalsIgnoreCase(status) || "all".equalsIgnoreCase(status)) ? null : status;
         String qFilter = (q == null || q.isBlank()) ? null : q;
-        var result = buyerService.listProfiles(ctx.advertiserId, statusFilter, assignedTo, qFilter, page, pageSize);
+        String consentFilter = (consentStatus == null || consentStatus.isBlank()) ? null : consentStatus;
+        String propertyTypeFilter = (propertyType == null || propertyType.isBlank()) ? null : propertyType;
+        var result = buyerService.listProfiles(ctx.advertiserId, statusFilter, assignedTo, qFilter, page, pageSize,
+            hasUnsentMatches, consentFilter, minBudget, propertyTypeFilter);
         return ResponseEntity.ok(Map.of("data", Map.of(
             "items", result.items(),
             "total", result.total(),
@@ -75,6 +82,22 @@ public class BuyerController {
         var ctx = resolveContext(claims);
         var profile = buyerService.updateProfile(ctx.advertiserId, id, ctx.scopedUserId, body);
         return ResponseEntity.ok(Map.of("data", profile));
+    }
+
+    @PatchMapping("/{id}/matches/notify")
+    public ResponseEntity<?> notifyMatches(
+            @PathVariable UUID id,
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal JwtClaims claims) {
+        var ctx = resolveContext(claims);
+        // Confirma que o comprador pertence à agência/ao consultor (mesmo padrão dos outros
+        // endpoints) antes de marcar matches como enviados.
+        buyerService.getProfile(ctx.advertiserId, id, ctx.scopedUserId);
+        @SuppressWarnings("unchecked")
+        var listingIds = ((java.util.List<String>) body.getOrDefault("listingIds", java.util.List.of()))
+            .stream().map(UUID::fromString).toList();
+        buyerService.notifyMatches(ctx.advertiserId, id, listingIds);
+        return ResponseEntity.ok(Map.of("data", Map.of("ok", true)));
     }
 
     @DeleteMapping("/{id}")
