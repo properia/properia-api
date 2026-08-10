@@ -127,7 +127,7 @@ public class UserCalendarConnectionController {
             var state = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(stateJson.getBytes(StandardCharsets.UTF_8));
 
-            var authUrl = "google".equals(provider) ? googleAuthUrl(state) : microsoftAuthUrl(state);
+            var authUrl = "google".equals(provider) ? googleAuthUrl(state, claims.email()) : microsoftAuthUrl(state);
             return ResponseEntity.ok(Map.of("data", Map.of("configured", true, "authUrl", authUrl)));
         } catch (Exception e) {
             log.error("Failed to build {} OAuth URL", provider, e);
@@ -135,15 +135,25 @@ public class UserCalendarConnectionController {
         }
     }
 
-    private String googleAuthUrl(String state) {
+    private String googleAuthUrl(String state, String userEmail) {
         // Scope de leitura+escrita — precisamos de escrever a visita e de ler FreeBusy.
+        //
+        // "prompt=consent" sozinho NÃO mostra o seletor de conta quando já há uma sessão
+        // Google ativa no browser — o Google avança direto com essa conta, mesmo que seja
+        // diferente da que o consultor quer ligar (caso real: consultor logado no Properia
+        // como iarussiraphael@gmail.com, mas com raphaeliarussi20@gmail.com já sessionado
+        // no browser Google — a ligação ficava silenciosamente presa a essa conta errada,
+        // sem o utilizador perceber). "select_account" força sempre o seletor a aparecer;
+        // login_hint só pré-seleciona a conta do email de login do Properia (mesmo assim o
+        // consultor pode escolher outra no seletor, se usar contas diferentes de propósito).
         return "https://accounts.google.com/o/oauth2/v2/auth"
             + "?client_id="     + enc(googleClientId)
             + "&redirect_uri="  + enc(googleRedirectUri)
             + "&response_type=code"
             + "&scope="         + enc("https://www.googleapis.com/auth/calendar")
             + "&access_type=offline"
-            + "&prompt=consent"
+            + "&prompt="        + enc("select_account consent")
+            + (userEmail != null && !userEmail.isBlank() ? "&login_hint=" + enc(userEmail) : "")
             + "&state="         + enc(state);
     }
 
