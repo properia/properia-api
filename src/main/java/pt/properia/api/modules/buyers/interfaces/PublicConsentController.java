@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import pt.properia.api.shared.domain.DomainException;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,17 +43,24 @@ public class PublicConsentController {
                 WHERE bp.consent_token = :token
                 """)
             .param("token", token)
-            .query((rs, n) -> Map.of(
-                "id", rs.getString("id"),
-                "buyerName", Optional.ofNullable(rs.getString("name")).orElse(""),
-                "buyerEmail", Optional.ofNullable(rs.getString("email")).orElse(""),
-                "consentStatus", rs.getString("consent_status"),
-                "consentAcceptedAt", rs.getTimestamp("consent_accepted_at") != null
-                    ? rs.getTimestamp("consent_accepted_at").toInstant().toString() : null,
-                "consentExpiresAt", rs.getTimestamp("consent_expires_at") != null
-                    ? rs.getTimestamp("consent_expires_at").toInstant().toString() : null,
-                "advertiserName", Optional.ofNullable(rs.getString("advertiser_name")).orElse("")
-            ))
+            // LinkedHashMap, não Map.of(): Map.of() lança NullPointerException se QUALQUER
+            // valor for null, e consent_accepted_at/consent_expires_at são sempre null num
+            // comprador acabado de criar (ninguém aceitou ainda) — todo o link ficava
+            // "inválido" na primeira abertura, sempre, para todo o comprador novo. Confirmado
+            // em produção via logs do Render (NullPointerException em getConsentPage).
+            .query((rs, n) -> {
+                var out = new LinkedHashMap<String, Object>();
+                out.put("id", rs.getString("id"));
+                out.put("buyerName", Optional.ofNullable(rs.getString("name")).orElse(""));
+                out.put("buyerEmail", Optional.ofNullable(rs.getString("email")).orElse(""));
+                out.put("consentStatus", rs.getString("consent_status"));
+                out.put("consentAcceptedAt", rs.getTimestamp("consent_accepted_at") != null
+                    ? rs.getTimestamp("consent_accepted_at").toInstant().toString() : null);
+                out.put("consentExpiresAt", rs.getTimestamp("consent_expires_at") != null
+                    ? rs.getTimestamp("consent_expires_at").toInstant().toString() : null);
+                out.put("advertiserName", Optional.ofNullable(rs.getString("advertiser_name")).orElse(""));
+                return out;
+            })
             .optional()
             .orElseThrow(() -> new DomainException("NOT_FOUND", "Link inválido ou expirado.", 404));
         return ResponseEntity.ok(Map.of("data", row));
