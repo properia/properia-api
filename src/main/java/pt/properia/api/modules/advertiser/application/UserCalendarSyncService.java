@@ -117,6 +117,35 @@ public class UserCalendarSyncService {
 
     // ── Sync da visita para a agenda do consultor ───────────────────────────────
 
+    /**
+     * Sincroniza as visitas futuras já confirmadas de um consultor — chamado quando ele liga
+     * a agenda pessoal pela primeira vez (OAuth callback). Sem isto, uma visita confirmada
+     * ANTES de o consultor ligar a agenda nunca aparecia lá: syncVisitToConsultantCalendar só
+     * corre quando a visita muda de estado (criar/confirmar/reagendar), nunca ao ligar o
+     * calendário — ligar depois de a visita já estar confirmada ficava sem efeito nenhum.
+     */
+    public void syncUpcomingVisitsForConsultant(UUID consultantId) {
+        try {
+            var visitIds = jdbc.sql("""
+                    SELECT v.id
+                    FROM properia.visits v
+                    LEFT JOIN properia.leads l ON l.id = v.lead_id
+                    LEFT JOIN properia.listings li ON li.id = v.listing_id
+                    WHERE v.status = 'confirmed'
+                      AND v.starts_at > now()
+                      AND COALESCE(l.assigned_to, li.owner_user_id) = :consultantId
+                    """)
+                .param("consultantId", consultantId)
+                .query(UUID.class)
+                .list();
+            for (var visitId : visitIds) {
+                syncVisitToConsultantCalendar(visitId);
+            }
+        } catch (Exception e) {
+            log.warn("user_calendar.backfill_sync_failed: consultant={} err={}", consultantId, e.getMessage());
+        }
+    }
+
     public void syncVisitToConsultantCalendar(UUID visitId) {
         try {
             var visit = loadVisitForSync(visitId);

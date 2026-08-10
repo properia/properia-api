@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import pt.properia.api.modules.advertiser.application.CalendarProviderClient;
 import pt.properia.api.modules.advertiser.application.GoogleCalendarService;
 import pt.properia.api.modules.advertiser.application.MicrosoftCalendarService;
+import pt.properia.api.modules.advertiser.application.UserCalendarSyncService;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -48,6 +49,7 @@ public class UserCalendarConnectionController {
     private final JdbcClient jdbc;
     private final GoogleCalendarService googleService;
     private final MicrosoftCalendarService microsoftService;
+    private final UserCalendarSyncService calendarSync;
     private final ObjectMapper json;
 
     @Value("${properia.google.calendar.client-id:}")
@@ -66,10 +68,12 @@ public class UserCalendarConnectionController {
     private String appUrl;
 
     public UserCalendarConnectionController(
-            JdbcClient jdbc, GoogleCalendarService googleService, MicrosoftCalendarService microsoftService, ObjectMapper json) {
+            JdbcClient jdbc, GoogleCalendarService googleService, MicrosoftCalendarService microsoftService,
+            UserCalendarSyncService calendarSync, ObjectMapper json) {
         this.jdbc = jdbc;
         this.googleService = googleService;
         this.microsoftService = microsoftService;
+        this.calendarSync = calendarSync;
         this.json = json;
     }
 
@@ -150,7 +154,11 @@ public class UserCalendarConnectionController {
             + "?client_id="     + enc(googleClientId)
             + "&redirect_uri="  + enc(googleRedirectUri)
             + "&response_type=code"
-            + "&scope="         + enc("https://www.googleapis.com/auth/calendar")
+            // + userinfo.email: sem este scope o token não tem permissão para o endpoint
+            // /oauth2/v2/userinfo devolver o campo "email" — fetchAccountEmail() ficava
+            // sempre com null, sem erro nenhum (o Google simplesmente omite o campo), daí
+            // account_email ficar vazio na ligação apesar de tudo o resto funcionar.
+            + "&scope="         + enc("https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email")
             + "&access_type=offline"
             + "&prompt="        + enc("select_account consent")
             + (userEmail != null && !userEmail.isBlank() ? "&login_hint=" + enc(userEmail) : "")
@@ -229,6 +237,10 @@ public class UserCalendarConnectionController {
                 .update();
 
             log.info("Personal {} calendar connected for user {}", provider, userId);
+            // Sem isto, uma visita já confirmada ANTES de ligar a agenda nunca aparecia lá —
+            // a sincronização só corre quando a visita muda de estado, nunca ao ligar o
+            // calendário. Best-effort: nunca falha a ligação em si.
+            calendarSync.syncUpcomingVisitsForConsultant(userId);
             return redirect(appUrl + nextUrl + "?calendar_connected=1&provider=" + provider);
         } catch (Exception e) {
             log.error("{} OAuth callback failed", provider, e);
