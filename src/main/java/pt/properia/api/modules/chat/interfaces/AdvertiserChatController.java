@@ -100,7 +100,12 @@ public class AdvertiserChatController {
             whereParts.add(HAS_UNANSWERED_BUYER_MESSAGE_SQL);
         }
 
-        var whereClause = "WHERE " + String.join(" AND ", whereParts);
+        // Espaço final é deliberado: sem ele, concatenar esta String simples com o
+        // próximo text block (que começa logo em "ORDER BY...", sem newline — o
+        // Java despe a quebra de linha inicial de um text block) cola o último
+        // token com a palavra seguinte (ex.: ":adv" + "ORDER" = parâmetro
+        // ":advORDER" inexistente). Já aconteceu em produção — não remover.
+        var whereClause = "WHERE " + String.join(" AND ", whereParts) + " ";
         var sql = jdbc.sql("""
                 SELECT
                     c.id::text, c.advertiser_id::text, c.listing_id::text,
@@ -261,8 +266,10 @@ public class AdvertiserChatController {
         var emitter = new SseEmitter(0L);
 
         try {
+            // Espaço final deliberado — ver comentário em whereClause (list()) sobre
+            // concatenação de String simples colada ao início de um text block.
             var scopeClause = scopedToSelf
-                ? "AND COALESCE(ld.assigned_to, li.owner_user_id) = :me"
+                ? "AND COALESCE(ld.assigned_to, li.owner_user_id) = :me "
                 : "";
 
             var unreadCount = jdbc.sql("""
