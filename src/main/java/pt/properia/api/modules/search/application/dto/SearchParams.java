@@ -53,6 +53,14 @@ public record SearchParams(
     boolean commercialHasExtractionSystem,
     List<String> commercialPermittedUse,
     String advertiserId,
+    // Condições especiais de aquisição (nua propriedade, quota parte, exploração
+    // turística). Por omissão false = excluídas da pesquisa: o preço anunciado não
+    // corresponde à compra plena do bem e distorce comparações.
+    boolean includeSpecialConditions,
+    // Interesse EXPLÍCITO em tipos concretos (ex.: ["NUDE_OWNERSHIP"]). Quando
+    // preenchido, a pesquisa devolve só esses e NÃO os penaliza — quem os procura
+    // de propósito não deve vê-los empurrados para o fim.
+    List<String> specialConditionTypes,
     AdvancedSearchFilters advanced
 ) {
     public static SearchParams defaults() {
@@ -66,6 +74,7 @@ public record SearchParams(
             false, false, false, false, false, null,
             false, List.of(), false, false, false, List.of(),
             null,
+            false, List.of(),
             AdvancedSearchFilters.empty()
         );
     }

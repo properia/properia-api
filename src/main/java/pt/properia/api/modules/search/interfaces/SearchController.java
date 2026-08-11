@@ -65,6 +65,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
             @RequestParam(required = false) String advertiserId,
+            @RequestParam(defaultValue = "false") boolean includeSpecialConditions,
+            @RequestParam(required = false) String specialConditionTypes,
             HttpServletRequest request) {
 
         int safePage = Math.max(1, page);
@@ -89,6 +91,7 @@ public class SearchController {
             commercialHasVehicleAccess, commercialHasFluePipe,
             commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
             advertiserId,
+            includeSpecialConditions, splitCsv(specialConditionTypes),
             buildAdvanced(request)
         );
 
@@ -130,6 +133,8 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
             @RequestParam(required = false) String advertiserId,
+            @RequestParam(defaultValue = "false") boolean includeSpecialConditions,
+            @RequestParam(required = false) String specialConditionTypes,
             HttpServletRequest request) {
 
         var params = new SearchParams(
@@ -150,6 +155,7 @@ public class SearchController {
             commercialHasVehicleAccess, commercialHasFluePipe,
             commercialHasExtractionSystem, splitCsv(commercialPermittedUse),
             advertiserId,
+            includeSpecialConditions, splitCsv(specialConditionTypes),
             buildAdvanced(request)
         );
 

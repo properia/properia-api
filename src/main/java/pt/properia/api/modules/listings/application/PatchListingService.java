@@ -31,6 +31,7 @@ public class PatchListingService {
     private final ZoneSnapshotService zoneSnapshotService;
     private final ListingPublishReadinessValidator readinessValidator;
     private final BuyerService buyerService;
+    private final SpecialConditionClassifier specialConditions;
 
     // Campos cuja alteração pode mudar a compatibilidade com critérios de compradores
     // (ver BuyerService.score()) — usados para decidir se vale a pena recalcular matches.
@@ -42,13 +43,15 @@ public class PatchListingService {
     public PatchListingService(ListingRepository repository, JdbcClient jdbc, ObjectMapper json,
                                 ZoneSnapshotService zoneSnapshotService,
                                 ListingPublishReadinessValidator readinessValidator,
-                                BuyerService buyerService) {
+                                BuyerService buyerService,
+                                SpecialConditionClassifier specialConditions) {
         this.repository = repository;
         this.jdbc = jdbc;
         this.json = json;
         this.zoneSnapshotService = zoneSnapshotService;
         this.readinessValidator = readinessValidator;
         this.buyerService = buyerService;
+        this.specialConditions = specialConditions;
     }
 
     private static final Set<String> ROLES_ALLOWED_TO_REASSIGN = Set.of("owner", "admin");
@@ -119,6 +122,17 @@ public class PatchListingService {
         }
         if (body.containsKey("descriptionRaw")) listing.setDescriptionRaw(str(body, "descriptionRaw"));
         if (body.containsKey("descriptionShort")) listing.setDescriptionShort(str(body, "descriptionShort"));
+
+        // Reclassifica condições especiais quando o texto muda. Nos dois sentidos:
+        // acrescentar "usufruto" passa a NUDE_OWNERSHIP, retirá-lo volta a FULL —
+        // senão uma correção de descrição deixava o imóvel escondido para sempre.
+        if (body.containsKey("title") || body.containsKey("descriptionRaw") || body.containsKey("descriptionShort")) {
+            var sc = specialConditions.classify(
+                listing.getTitle(), listing.getDescriptionRaw(), listing.getDescriptionShort());
+            listing.setOwnershipType(sc.ownershipType());
+            listing.setUsageRestriction(sc.usageRestriction());
+            listing.setSpecialConditionSummary(sc.summary());
+        }
         if (body.containsKey("heroImageUrl")) listing.setHeroImageUrl(str(body, "heroImageUrl"));
         if (body.containsKey("alRegistrationNumber")) listing.setAlRegistrationNumber(str(body, "alRegistrationNumber"));
         if (body.containsKey("licencaUtilizacao")) listing.setLicencaUtilizacao(str(body, "licencaUtilizacao"));

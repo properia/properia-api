@@ -103,6 +103,19 @@ public class Listing {
     @Column(name = "lot_area_m2", precision = 10, scale = 2)
     private BigDecimal lotAreaM2;
 
+    // Condições especiais de aquisição (V76) — ver SpecialConditionClassifier.
+    // is_special_condition NÃO está mapeada de propósito: é uma coluna GERADA na base
+    // de dados a partir destas duas. Mapeá-la como campo escrevível deixaria o
+    // Hibernate tentar inseri-la e a base rejeitaria a escrita.
+    @Column(name = "ownership_type")
+    private String ownershipType = "FULL";        // FULL | NUDE_OWNERSHIP | PARTIAL_SHARE
+
+    @Column(name = "usage_restriction")
+    private String usageRestriction = "NONE";     // NONE | TENANT_VITALICIO | TOURISTIC_EXPLORATION
+
+    @Column(name = "special_condition_summary")
+    private String specialConditionSummary;
+
     // Atributos específicos por tipo (V56) — todos opcionais.
     @Column(name = "land_type")
     private String landType;              // urbano | urbanizavel | rustico | agricola
@@ -341,6 +354,18 @@ public class Listing {
     public BigDecimal getUsableAreaM2() { return usableAreaM2; }
     public BigDecimal getGrossAreaM2() { return grossAreaM2; }
     public BigDecimal getLotAreaM2() { return lotAreaM2; }
+    public String getOwnershipType() { return ownershipType; }
+    public void setOwnershipType(String ownershipType) { this.ownershipType = ownershipType; }
+    public String getUsageRestriction() { return usageRestriction; }
+    public void setUsageRestriction(String usageRestriction) { this.usageRestriction = usageRestriction; }
+    public String getSpecialConditionSummary() { return specialConditionSummary; }
+    public void setSpecialConditionSummary(String specialConditionSummary) { this.specialConditionSummary = specialConditionSummary; }
+    /** Espelha a coluna gerada is_special_condition (não persistida a partir daqui). */
+    public boolean isSpecialCondition() {
+        return (ownershipType != null && !"FULL".equals(ownershipType))
+            || (usageRestriction != null && !"NONE".equals(usageRestriction));
+    }
+
     public String getLandType() { return landType; }
     public BigDecimal getCeilingHeightM() { return ceilingHeightM; }
     public String getWaterSource() { return waterSource; }

@@ -21,9 +21,13 @@ public class CreateListingUseCase {
     private final ListingRepository repository;
     private final JdbcClient jdbc;
 
-    public CreateListingUseCase(ListingRepository repository, JdbcClient jdbc) {
+    private final SpecialConditionClassifier specialConditions;
+
+    public CreateListingUseCase(ListingRepository repository, JdbcClient jdbc,
+                                SpecialConditionClassifier specialConditions) {
         this.repository = repository;
         this.jdbc = jdbc;
+        this.specialConditions = specialConditions;
     }
 
     public record Command(
@@ -107,6 +111,7 @@ public class CreateListingUseCase {
         listing.setTitleNormalized(cmd.title().strip().toLowerCase());
         listing.setDescriptionRaw(cmd.descriptionRaw());
         listing.setDescriptionShort(cmd.descriptionShort());
+        applySpecialConditions(listing);
         listing.setPriceAmount(cmd.priceAmount());
         listing.setBedrooms(cmd.bedrooms() != null ? cmd.bedrooms() : 0);
         listing.setBathrooms(cmd.bathrooms() != null ? cmd.bathrooms() : BigDecimal.ZERO);
@@ -255,6 +260,20 @@ public class CreateListingUseCase {
     // Espelha a regra de RBAC de PatchListingService.patch() (bloco "Agent assignment") para
     // que criar-e-atribuir-a-outro-consultor num único pedido siga a mesma política que a
     // reatribuição pós-criação — em vez de o campo ser silenciosamente ignorado.
+    /**
+     * Classifica condições especiais (nua propriedade, quota parte, exploração
+     * turística) a partir do texto do anúncio. Corre em criação e em cada edição de
+     * texto: corrigir a descrição tem de poder corrigir também a classificação, nos
+     * dois sentidos — um anúncio que deixa de mencionar usufruto volta a FULL.
+     */
+    private void applySpecialConditions(Listing listing) {
+        var result = specialConditions.classify(
+            listing.getTitle(), listing.getDescriptionRaw(), listing.getDescriptionShort());
+        listing.setOwnershipType(result.ownershipType());
+        listing.setUsageRestriction(result.usageRestriction());
+        listing.setSpecialConditionSummary(result.summary());
+    }
+
     private UUID resolveOwnerUserId(Command cmd) {
         if (cmd.assignedAgentId() == null || cmd.assignedAgentId().equals(cmd.requestorUserId())) {
             return cmd.requestorUserId();

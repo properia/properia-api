@@ -38,6 +38,12 @@ public record PublicListingDetailDto(
     // em qualquer anúncio de arrendamento de curta duração. Só populado quando businessType
     // == "holiday_rent"; null nos restantes casos.
     String alRegistrationNumber,
+    // Condições especiais de aquisição (V76): o preço anunciado não corresponde à
+    // compra plena do bem. A ficha mostra isto em destaque ANTES da descrição.
+    String ownershipType,
+    String usageRestriction,
+    String specialConditionSummary,
+    boolean isSpecialCondition,
     String sunExposure,
     String city,
     String district,

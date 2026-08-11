@@ -146,6 +146,7 @@ public class JdbcSearchRepository implements SearchRepository {
               l.is_immediately_available, l.available_from,
               l.published_at, l.updated_at,
               com.floorplan_url, com.youtube_tour_url, com.virtual_tour_url, com.virtual_tour_status,
+              l.ownership_type, l.usage_restriction, l.special_condition_summary, l.is_special_condition,
               zs.zone_label_primary, zs.zone_summary_short,
               COALESCE(dv_agg.view_count, 0)      AS detail_views_total,
               COALESCE(ph_agg.change_count, 0)     AS ph_change_count,
@@ -536,6 +537,21 @@ public class JdbcSearchRepository implements SearchRepository {
         // critério de ORDENAÇÃO sobre listing_zone_snapshots (a tabela realmente
         // preenchida pelo enriquecimento de zona).
 
+        // ── Condições especiais de aquisição ─────────────────────────────────────
+        // Nua propriedade / quota parte / exploração turística ficam FORA da pesquisa
+        // por omissão: o preço anunciado não corresponde à compra plena do bem, pelo
+        // que aparecem como "pechinchas" e distorcem qualquer comparação de preço.
+        // Só entram quando o utilizador o pede explicitamente.
+        var specialTypes = p.specialConditionTypes();
+        if (specialTypes != null && !specialTypes.isEmpty()) {
+            // Interesse explícito num tipo concreto: mostra SÓ esses (é o que a pessoa
+            // veio procurar) — e não os penaliza no ranking (ver buildScoreSortPlan).
+            parts.add("(l.ownership_type = ANY(:specialTypes) OR l.usage_restriction = ANY(:specialTypes))");
+            params.put("specialTypes", specialTypes.toArray(String[]::new));
+        } else if (!p.includeSpecialConditions()) {
+            parts.add("l.is_special_condition = FALSE");
+        }
+
         // Advertiser filter (agency profile page)
         if (p.advertiserId() != null && !p.advertiserId().isBlank()) {
             parts.add("l.advertiser_id = :advertiserId::uuid");
@@ -606,6 +622,34 @@ public class JdbcSearchRepository implements SearchRepository {
         "CASE WHEN l.is_featured THEN 0 ELSE 1 END ASC, "
         + "md5(l.id::text || to_char(CURRENT_DATE, 'YYYY-MM-DD')) ASC, ";
 
+    // ── Penalização de condições especiais no ranking ──────────────────────────
+    // Só se aplica quando estes imóveis são incluídos SEM interesse explícito num
+    // tipo concreto: quem foi procurar nua propriedade de propósito não deve
+    // recebê-la empurrada para o fim.
+    private static boolean shouldPenalizeSpecial(SearchParams p) {
+        var types = p.specialConditionTypes();
+        boolean explicitInterest = types != null && !types.isEmpty();
+        return p.includeSpecialConditions() && !explicitInterest;
+    }
+
+    /**
+     * Chave de ordenação que manda os imóveis com condições especiais para o fim,
+     * antes de qualquer outro critério (false=0 primeiro, true=1 depois).
+     *
+     * Aplicada só às ordenações que RANQUEIAM por mérito — compatibilidade e
+     * preço/m². É nessas que o preço de uma nua propriedade (que não dá posse
+     * imediata) engana: um T4 a 180.000 € tem um €/m² imbatível e dominaria a lista
+     * de "melhor valor" sem ser comparável com nada à volta. Ordenações literais
+     * (preço, área) ficam intactas — quem pediu "mais barato primeiro" tem direito
+     * a ver exatamente isso, e nessas o preço baixo não está disfarçado de mérito.
+     */
+    private static final String SPECIAL_CONDITION_DEMOTION = "l.is_special_condition ASC, ";
+
+    // Fator multiplicativo no score de compatibilidade (-30%). Complementa a
+    // demoção: garante que, mesmo DENTRO do grupo dos especiais, um imóvel com
+    // condição restritiva não empata com um normal de proximidade equivalente.
+    private static final double SPECIAL_CONDITION_SCORE_FACTOR = 0.70;
+
     private static boolean hasUsablePois(SearchParams p) {
         java.util.function.Predicate<List<String>> usable = list -> list != null && list.stream()
             .anyMatch(POI_TO_ZONE_CATEGORY::containsKey);
@@ -659,7 +703,7 @@ public class JdbcSearchRepository implements SearchRepository {
                 """,
                 "LEFT JOIN comparables cmp ON cmp.city = l.city "
                 + "AND cmp.property_type = l.property_type AND cmp.business_type = l.business_type",
-                """
+                (shouldPenalizeSpecial(p) ? SPECIAL_CONDITION_DEMOTION : "") + """
                 (
                     CASE WHEN l.usable_area_m2 > 0 AND l.price_amount IS NOT NULL AND cmp.avg_ppm2 > 0
                          THEN (l.price_amount / l.usable_area_m2) / cmp.avg_ppm2
@@ -747,10 +791,20 @@ public class JdbcSearchRepository implements SearchRepository {
 
         // Destaque continua a ser um empurrão pequeno que nunca decide sozinho: não
         // chega para um destaque irrelevante ultrapassar um imóvel mesmo à porta do POI.
-        var orderBy = "("
+        var compatibility = "("
             + proximity + " * 0.85"
             + " + (CASE WHEN l.is_featured THEN 0.15 ELSE 0 END)"
-            + ") DESC, l.published_at DESC NULLS LAST, l.created_at DESC";
+            + ")";
+
+        // -30% a condições especiais: mesmo dentro do bloco delas, uma nua propriedade
+        // não empata com um imóvel normal de proximidade equivalente.
+        if (shouldPenalizeSpecial(p)) {
+            compatibility = "(" + compatibility
+                + " * CASE WHEN l.is_special_condition THEN " + SPECIAL_CONDITION_SCORE_FACTOR + " ELSE 1 END)";
+        }
+
+        var orderBy = (shouldPenalizeSpecial(p) ? SPECIAL_CONDITION_DEMOTION : "")
+            + compatibility + " DESC, l.published_at DESC NULLS LAST, l.created_at DESC";
 
         return new SortPlan("", "", orderBy, params);
     }
@@ -839,6 +893,10 @@ public class JdbcSearchRepository implements SearchRepository {
             buildPriceHistorySnapshot(rs),
             rs.getString("virtual_tour_url"),
             rs.getString("virtual_tour_status"),
+            rs.getString("ownership_type"),
+            rs.getString("usage_restriction"),
+            rs.getString("special_condition_summary"),
+            rs.getBoolean("is_special_condition"),
             null  // commuteSummary — preenchido por SearchListingsUseCase quando pedido
         );
     }

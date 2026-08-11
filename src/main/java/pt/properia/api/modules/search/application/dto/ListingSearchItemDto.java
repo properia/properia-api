@@ -78,6 +78,12 @@ public record ListingSearchItemDto(
     PriceHistorySnapshotDto priceHistorySnapshot,
     String virtualTourUrl,
     String virtualTourStatus,
+    // Condições especiais de aquisição (V76) — o card precisa delas para o selo de
+    // aviso e o resumo; sem isto o utilizador via o preço baixo sem o contexto.
+    String ownershipType,
+    String usageRestriction,
+    String specialConditionSummary,
+    boolean isSpecialCondition,
     CommuteSummaryDto commuteSummary
 ) {
     public ListingSearchItemDto withCommuteSummary(CommuteSummaryDto cs) {
@@ -97,6 +103,7 @@ public record ListingSearchItemDto(
             sunExposure, tipologia, isImmediatelyAvailable, availableFrom,
             publishedAt, updatedAt, zoneLabelPrimary, zoneSummaryShort,
             detailViewsTotal, priceHistorySnapshot, virtualTourUrl, virtualTourStatus,
+            ownershipType, usageRestriction, specialConditionSummary, isSpecialCondition,
             cs
         );
     }
