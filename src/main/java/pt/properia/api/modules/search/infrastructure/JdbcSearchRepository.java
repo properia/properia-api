@@ -24,29 +24,42 @@ public class JdbcSearchRepository implements SearchRepository {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcSearchRepository.class);
 
-    // ── POI: mapeamento das categorias do parser NL/IA para listing_poi_snapshots ──
-    // 10 categorias têm distância exata (nearest_X_m); praia/cultura/biblioteca só
-    // têm contagem dentro do raio do snapshot (700m) — usamos "presente" como proxy.
-    private static final java.util.Map<String, String> POI_DISTANCE_COLUMN = java.util.Map.ofEntries(
-        java.util.Map.entry("transporte", "nearest_transport_m"),
-        java.util.Map.entry("escola", "nearest_school_m"),
-        java.util.Map.entry("supermercado", "nearest_supermarket_m"),
-        java.util.Map.entry("saude", "nearest_health_m"),
-        java.util.Map.entry("parque", "nearest_park_m"),
-        java.util.Map.entry("ginasio", "nearest_gym_m"),
-        java.util.Map.entry("restaurante", "nearest_restaurant_m"),
-        java.util.Map.entry("cafe", "nearest_cafe_m"),
-        java.util.Map.entry("farmacia", "nearest_pharmacy_m"),
-        java.util.Map.entry("banco", "nearest_bank_m")
-    );
-    private static final java.util.Map<String, String> POI_COUNT_COLUMN = java.util.Map.ofEntries(
-        java.util.Map.entry("praia", "beach_count"),
-        java.util.Map.entry("cultura", "culture_count"),
-        java.util.Map.entry("biblioteca", "culture_count")
+    // ── POI: categorias do parser NL/IA → taxonomia de listing_zone_snapshots ─────
+    // A fonte de verdade dos POIs é listing_zone_snapshots.payload (jsonb), escrita
+    // pelo enriquecimento Overpass (ZoneSnapshotService) e já usada na página de
+    // detalhe. Estrutura: payload->'categories' = [{category, nearestDistanceM,
+    // walkingMinutes, totalCount, topPois[]}].
+    //
+    // A taxonomia de zona tem 8 categorias e usa plural/agrupamentos (restaurante e
+    // café caem ambos em "cafes_restauracao"), enquanto o parser emite 13 ids no
+    // singular — daí este mapeamento explícito. Os 4 ids sem correspondência
+    // (banco, praia, cultura, biblioteca) não são recolhidos pelo enriquecimento:
+    // não contribuem para o score, mas também nunca penalizam (ver score neutro).
+    private static final java.util.Map<String, String> POI_TO_ZONE_CATEGORY = java.util.Map.ofEntries(
+        java.util.Map.entry("transporte", "transportes"),
+        java.util.Map.entry("escola", "escolas"),
+        java.util.Map.entry("supermercado", "supermercados"),
+        java.util.Map.entry("saude", "saude"),
+        java.util.Map.entry("parque", "parques"),
+        java.util.Map.entry("ginasio", "ginasios"),
+        java.util.Map.entry("farmacia", "farmacias"),
+        java.util.Map.entry("restaurante", "cafes_restauracao"),
+        java.util.Map.entry("cafe", "cafes_restauracao")
     );
     // Ritmo de caminhada urbano de referência (~4.8 km/h) para converter minutos → metros.
     private static final int WALK_METERS_PER_MINUTE = 80;
     private static final int DEFAULT_ZONE_MAX_MINUTES = 10;
+
+    // Score de proximidade para imóveis sem dados de POI (sem enriquecimento, ou
+    // enriquecidos mas sem nada daquela categoria por perto). Deliberadamente o meio
+    // da escala 0–1: um imóvel por enriquecer NÃO é eliminado nem empurrado para o
+    // fundo — fica no meio do pelotão e é desempatado pelos restantes critérios.
+    // Só quem tem dados REAIS sobe acima (perto) ou desce abaixo (longe) deste ponto.
+    private static final double NEUTRAL_PROXIMITY = 0.5;
+    // POIs pedidos explicitamente ("perto de metro") pesam mais do que preferências
+    // ("idealmente perto de") — deixaram de excluir, mas continuam a mandar mais.
+    private static final double HARD_POI_WEIGHT = 1.0;
+    private static final double SOFT_POI_WEIGHT = 0.5;
 
     private final JdbcClient jdbc;
 
@@ -208,7 +221,10 @@ public class JdbcSearchRepository implements SearchRepository {
     );
 
     private SearchRankingSummaryDto buildRankingSummary(SearchParams p, SortPlan plan) {
-        var sort = p.sort() == null ? "recente" : p.sort();
+        // Ordem EFETIVA (não a pedida): com a auto-promoção, uma pesquisa com POIs
+        // sai em "score" mesmo tendo chegado como "recente" — o resumo tem de
+        // explicar a ordem que o utilizador está mesmo a ver.
+        var sort = effectiveSort(p);
 
         if ("value".equals(sort)) {
             return new SearchRankingSummaryDto(
@@ -220,8 +236,15 @@ public class JdbcSearchRepository implements SearchRepository {
             );
         }
 
-        if ("score".equals(sort) && p.softPois() != null && !p.softPois().isEmpty()) {
-            var labels = p.softPois().stream()
+        if ("score".equals(sort) && hasUsablePois(p)) {
+            // Junta obrigatórios e preferenciais: ambos entram no score, ambos têm
+            // de aparecer na explicação. Antes só os suaves eram mencionados, pelo
+            // que uma pesquisa "perto de metro" ficava sem explicação nenhuma.
+            var requested = new ArrayList<String>();
+            if (p.hardPois() != null) requested.addAll(p.hardPois());
+            if (p.softPois() != null) requested.addAll(p.softPois());
+            var labels = requested.stream()
+                .filter(POI_TO_ZONE_CATEGORY::containsKey)
                 .map(id -> POI_LABEL_PT.getOrDefault(id, id))
                 .distinct()
                 .toList();
@@ -503,31 +526,15 @@ public class JdbcSearchRepository implements SearchRepository {
             if (adv.agriculturalUse()) parts.add("l.agricultural_use = true");
         }
 
-        // Pontos de interesse rígidos ("perto de metro", etc.) — antes disto, o
-        // parser detetava a intenção mas o backend ignorava-a por completo (só
-        // afetava chips visuais). Usa a distância real do snapshot mais recente.
-        if (p.hardPois() != null && !p.hardPois().isEmpty()) {
-            int maxMeters = (p.zoneMaxMinutes() != null ? p.zoneMaxMinutes() : DEFAULT_ZONE_MAX_MINUTES)
-                * WALK_METERS_PER_MINUTE;
-            var conditions = new ArrayList<String>();
-            for (var poi : p.hardPois()) {
-                var distCol = POI_DISTANCE_COLUMN.get(poi);
-                var countCol = POI_COUNT_COLUMN.get(poi);
-                if (distCol != null) {
-                    conditions.add("EXISTS (SELECT 1 FROM properia.listing_poi_snapshots ps "
-                        + "WHERE ps.listing_id = l.id AND ps." + distCol + " IS NOT NULL "
-                        + "AND ps." + distCol + " <= :hardPoiMaxMeters)");
-                } else if (countCol != null) {
-                    conditions.add("EXISTS (SELECT 1 FROM properia.listing_poi_snapshots ps "
-                        + "WHERE ps.listing_id = l.id AND ps." + countCol + " > 0)");
-                }
-            }
-            if (!conditions.isEmpty()) {
-                params.put("hardPoiMaxMeters", maxMeters);
-                var joiner = "any".equals(p.hardPoisMode()) ? " OR " : " AND ";
-                parts.add("(" + String.join(joiner, conditions) + ")");
-            }
-        }
+        // Pontos de interesse: NÃO entram no WHERE — ver buildScoreSortPlan().
+        // Antes havia aqui um EXISTS sobre listing_poi_snapshots que eliminava da
+        // listagem qualquer imóvel fora do raio. Dois problemas: (1) confundia "fica
+        // longe" com "nunca foi enriquecido", eliminando inventário por motivo técnico;
+        // (2) lia uma tabela que NENHUM código de aplicação escreve (só V1/V35) — em
+        // produção, 0 de 27 imóveis publicados tinham lá linha, portanto qualquer
+        // pesquisa com POIs devolvia zero resultados. A proximidade passou a ser
+        // critério de ORDENAÇÃO sobre listing_zone_snapshots (a tabela realmente
+        // preenchida pelo enriquecimento de zona).
 
         // Advertiser filter (agency profile page)
         if (p.advertiserId() != null && !p.advertiserId().isBlank()) {
@@ -599,8 +606,34 @@ public class JdbcSearchRepository implements SearchRepository {
         "CASE WHEN l.is_featured THEN 0 ELSE 1 END ASC, "
         + "md5(l.id::text || to_char(CURRENT_DATE, 'YYYY-MM-DD')) ASC, ";
 
+    private static boolean hasUsablePois(SearchParams p) {
+        java.util.function.Predicate<List<String>> usable = list -> list != null && list.stream()
+            .anyMatch(POI_TO_ZONE_CATEGORY::containsKey);
+        return usable.test(p.hardPois()) || usable.test(p.softPois());
+    }
+
+    /**
+     * Ordem efetiva. Uma pesquisa que traz POIs ("perto de metro", "zona calma") é
+     * uma pesquisa por contexto: mantê-la em "recente" anularia por completo o
+     * cálculo de proximidade e o utilizador veria a mesma lista de sempre.
+     *
+     * Só promove a partir de "recente". Ordens que exprimem uma intenção explícita e
+     * verificável (preço, área, relação preço/m²) são respeitadas — reordenar por
+     * baixo quem pediu "mais barato primeiro" quebraria a confiança na ordenação,
+     * mesmo princípio já aplicado ao impulso de destaque (ver FEATURED_BOOST_PREFIX).
+     *
+     * Nota: o frontend envia sempre `sort`, por isso não há como distinguir aqui
+     * "recente por omissão" de "recente escolhido à mão" — quem tiver POIs ativos e
+     * escolher "Mais recentes" recebe ordenação por compatibilidade.
+     */
+    private String effectiveSort(SearchParams p) {
+        var sort = (p.sort() == null || p.sort().isBlank()) ? "recente" : p.sort();
+        if ("recente".equals(sort) && hasUsablePois(p)) return "score";
+        return sort;
+    }
+
     private SortPlan buildSortPlan(SearchParams p) {
-        var sort = p.sort() == null ? "recente" : p.sort();
+        var sort = effectiveSort(p);
 
         var defaultPlan = new SortPlan("", "", FEATURED_BOOST_PREFIX
             + "l.published_at DESC NULLS LAST, l.created_at DESC", java.util.Map.of());
@@ -647,35 +680,79 @@ public class JdbcSearchRepository implements SearchRepository {
         };
     }
 
-    private SortPlan buildScoreSortPlan(SearchParams p, SortPlan fallback) {
-        var softPois = p.softPois();
-        if (softPois == null || softPois.isEmpty()) {
-            // Sem contexto semântico (ninguém escolheu isto por pesquisa/perfil) —
-            // cai para destaque + recência, em vez de um "score" vazio sem sentido.
-            return fallback;
-        }
+    /**
+     * Proximidade média (0–1) do imóvel às categorias pedidas, a partir do snapshot de
+     * zona mais recente. 1 = à porta, 0 = no limite do raio ou além.
+     *
+     * DISTINCT ON garante uma linha por categoria vinda do snapshot mais recente —
+     * um imóvel reprocessado tem várias linhas em listing_zone_snapshots e sem isto
+     * a média misturaria leituras antigas com atuais.
+     *
+     * Devolve NULL (não 0) quando não há dados: quem chama distingue "longe" de
+     * "não sabemos" e aplica o score neutro. Era exatamente essa confusão que
+     * fazia o antigo COALESCE(..., 0) penalizar imóveis por falta de enriquecimento.
+     */
+    private String poiProximityExpr(List<String> pois, String prefix,
+                                    java.util.Map<String, Object> params, int maxMeters) {
+        if (pois == null || pois.isEmpty()) return null;
+        var categories = pois.stream()
+            .map(POI_TO_ZONE_CATEGORY::get)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        if (categories.isEmpty()) return null;
 
+        params.put(prefix + "Cats", categories.toArray(String[]::new));
+        params.put(prefix + "MaxM", maxMeters);
+
+        return "(SELECT AVG(GREATEST(0, 1 - LEAST(d.dist, :" + prefix + "MaxM)::float / :" + prefix + "MaxM)) "
+            + "FROM ("
+            + "  SELECT DISTINCT ON (c->>'category') (c->>'nearestDistanceM')::numeric AS dist"
+            + "  FROM properia.listing_zone_snapshots zs,"
+            + "       LATERAL jsonb_array_elements(zs.payload->'categories') c"
+            + "  WHERE zs.listing_id = l.id AND zs.status = 'processed'"
+            + "    AND c->>'category' = ANY(:" + prefix + "Cats)"
+            + "    AND c->>'nearestDistanceM' IS NOT NULL"
+            + "  ORDER BY c->>'category', zs.processed_at DESC NULLS LAST"
+            + ") d)";
+    }
+
+    private SortPlan buildScoreSortPlan(SearchParams p, SortPlan fallback) {
         int maxMeters = (p.zoneMaxMinutes() != null ? p.zoneMaxMinutes() : DEFAULT_ZONE_MAX_MINUTES)
             * WALK_METERS_PER_MINUTE;
 
-        var terms = new ArrayList<String>();
-        for (var poi : softPois) {
-            var distCol = POI_DISTANCE_COLUMN.get(poi);
-            if (distCol == null) continue; // praia/cultura/biblioteca: sem distância, não entram no score numérico
-            terms.add("COALESCE((SELECT GREATEST(0, 1 - ps." + distCol + "::float / :scoreMaxMeters) "
-                + "FROM properia.listing_poi_snapshots ps WHERE ps.listing_id = l.id "
-                + "ORDER BY ps.processed_at DESC LIMIT 1), 0)");
+        var params = new java.util.LinkedHashMap<String, Object>();
+        var hardExpr = poiProximityExpr(p.hardPois(), "hardPoi", params, maxMeters);
+        var softExpr = poiProximityExpr(p.softPois(), "softPoi", params, maxMeters);
+
+        if (hardExpr == null && softExpr == null) {
+            // Sem POIs utilizáveis — cai para destaque + recência, em vez de um
+            // "score" vazio que ordenaria tudo por igual.
+            return fallback;
         }
 
-        if (terms.isEmpty()) return fallback;
+        // Média ponderada: obrigatórios pesam o dobro dos preferenciais. Cada lado
+        // que não tenha dados entra com o neutro, nunca com 0.
+        var numerator = new ArrayList<String>();
+        double totalWeight = 0;
+        if (hardExpr != null) {
+            numerator.add("COALESCE(" + hardExpr + ", " + NEUTRAL_PROXIMITY + ") * " + HARD_POI_WEIGHT);
+            totalWeight += HARD_POI_WEIGHT;
+        }
+        if (softExpr != null) {
+            numerator.add("COALESCE(" + softExpr + ", " + NEUTRAL_PROXIMITY + ") * " + SOFT_POI_WEIGHT);
+            totalWeight += SOFT_POI_WEIGHT;
+        }
+        var proximity = "((" + String.join(" + ", numerator) + ") / " + totalWeight + ")";
 
-        var avgProximity = "((" + String.join(" + ", terms) + ") / " + terms.size() + ".0)";
+        // Destaque continua a ser um empurrão pequeno que nunca decide sozinho: não
+        // chega para um destaque irrelevante ultrapassar um imóvel mesmo à porta do POI.
         var orderBy = "("
-            + avgProximity + " * 0.85"
+            + proximity + " * 0.85"
             + " + (CASE WHEN l.is_featured THEN 0.15 ELSE 0 END)"
-            + ") DESC, l.published_at DESC";
+            + ") DESC, l.published_at DESC NULLS LAST, l.created_at DESC";
 
-        return new SortPlan("", "", orderBy, java.util.Map.of("scoreMaxMeters", maxMeters));
+        return new SortPlan("", "", orderBy, params);
     }
 
     // ── Row mapper ─────────────────────────────────────────────────────────────
