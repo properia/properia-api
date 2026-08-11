@@ -178,6 +178,79 @@ public class AuthEmailService {
         );
     }
 
+    // ── Angariação: landing pública de avaliação ──────────────────────────────
+
+    /**
+     * Relatório de estimativa para o proprietário que submeteu o formulário.
+     *
+     * A ressalva legal é conteúdo obrigatório, não rodapé decorativo: em Portugal
+     * a avaliação imobiliária é atividade regulada e isto é uma estimativa
+     * indicativa, não uma avaliação certificada.
+     */
+    public void sendValuationReport(String to, String firstName, String addressLabel,
+                                    String rangeLabel, String scopeLabel,
+                                    int comparables, String consultantLine, String token) {
+        String url = appUrl + "/vender/relatorio/" + token;
+        String greeting = (firstName != null && !firstName.isBlank()) ? "Olá " + firstName + "," : "Olá,";
+        String where = (addressLabel != null && !addressLabel.isBlank()) ? " em " + addressLabel : "";
+
+        String body = greeting + "<br><br>Aqui está a estimativa para o seu imóvel" + where + ":<br><br>"
+            + "<span style=\"font-size:26px;font-weight:800;color:#1a1a1a\">" + rangeLabel + "</span><br>"
+            + "<span style=\"font-size:13px;color:#888\">Base de cálculo: " + comparables
+            + " imóveis comparáveis" + (scopeLabel != null ? " · " + scopeLabel : "") + "</span><br><br>"
+            + (consultantLine != null && !consultantLine.isBlank() ? consultantLine + "<br><br>" : "")
+            + "<span style=\"font-size:12px;color:#888\">Estimativa indicativa gerada a partir de dados de "
+            + "mercado. Não constitui avaliação imobiliária certificada nos termos da Lei n.º 153/2015. "
+            + "Para um valor rigoroso é necessária uma visita ao imóvel.</span>";
+
+        send(to,
+            "A estimativa do seu imóvel" + where,
+            html("A estimativa do seu imóvel", body, "Ver relatório completo", url),
+            greeting + "\nEstimativa para o seu imóvel" + where + ": " + rangeLabel
+                + "\nBase: " + comparables + " imóveis comparáveis."
+                + "\nRelatório completo: " + url
+                + "\n\nEstimativa indicativa; não constitui avaliação imobiliária certificada."
+        );
+    }
+
+    /** Código de verificação do contacto submetido na landing de angariação. */
+    public void sendValuationContactCode(String to, String code) {
+        send(to,
+            "O seu código de confirmação Properia",
+            html("Confirme o seu contacto",
+                "Use o código abaixo para confirmar o email e desbloquear o relatório completo "
+                + "da estimativa do seu imóvel.<br><br>"
+                + "<span style=\"font-size:32px;font-weight:700;letter-spacing:8px;color:#1a1a1a\">"
+                + code + "</span><br><br>O código expira em 10 minutos.",
+                "Abrir Properia", appUrl + "/vender"),
+            "O seu código de confirmação na Properia: " + code + " (válido 10 minutos)"
+        );
+    }
+
+    /** Alerta ao consultor: um proprietário pediu avaliação. */
+    public void sendValuationLeadToConsultant(String to, String contactName, String addressLabel,
+                                              String rangeLabel, String horizonLabel, String leadId) {
+        String url = appUrl + "/anunciante/leads/" + leadId;
+        String who = (contactName != null && !contactName.isBlank()) ? contactName : "Um proprietário";
+
+        send(to,
+            "Novo pedido de avaliação — " + (addressLabel != null ? addressLabel : "angariação"),
+            html("Novo pedido de avaliação",
+                "<strong>" + who + "</strong> pediu uma avaliação"
+                + (addressLabel != null && !addressLabel.isBlank() ? " para <strong>" + addressLabel + "</strong>" : "")
+                + ".<br><br>"
+                + (rangeLabel != null ? "Estimativa apresentada: <strong>" + rangeLabel + "</strong><br>" : "")
+                + (horizonLabel != null ? "Horizonte de venda: <strong>" + horizonLabel + "</strong><br>" : "")
+                + "<br>Quem responde nas primeiras horas angaria; quem responde no dia seguinte "
+                + "encontra o imóvel já com outra mediadora.",
+                "Ver lead", url),
+            who + " pediu uma avaliação"
+                + (addressLabel != null ? " para " + addressLabel : "") + ".\n"
+                + (rangeLabel != null ? "Estimativa: " + rangeLabel + "\n" : "")
+                + "Ver lead: " + url
+        );
+    }
+
     private void send(String to, String subject, String htmlBody, String textBody) {
         if (!enabled) {
             log.warn("Email NOT sent (RESEND_API_KEY not configured): to={} subject={}", to, subject);

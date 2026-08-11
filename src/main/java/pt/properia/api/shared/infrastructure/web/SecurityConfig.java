@@ -96,6 +96,14 @@ public class SecurityConfig {
                 // Buyer consent (token-based, public)
                 .requestMatchers("/api/public/buyer-consent/**").permitAll()
 
+                // Angariação: landing pública /vender. Já coberto pela regra
+                // genérica /api/public/** acima, mas declarado explicitamente
+                // porque é uma superfície pública de escrita — quem alterar as
+                // regras tem de a ver, não de a deduzir. Proteção real: honeypot
+                // + tempo de preenchimento, tiers PUBLIC_FORM/ESTIMATE do
+                // RateLimitingFilter e verificação de contacto por código.
+                .requestMatchers("/api/public/valuation/**").permitAll()
+
                 // Visit requests (unauthenticated visitors can request)
                 .requestMatchers(HttpMethod.GET, "/api/visitas/disponibilidade").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/visitas").permitAll()

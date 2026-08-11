@@ -61,6 +61,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     private enum Tier {
         AUTH(5, Duration.ofMinutes(1)),
+        // Formulário público de angariação: submissão real e única por sessão de
+        // um proprietário. Um humano não submete 6 avaliações em 10 minutos; um
+        // bot submete 600.
+        PUBLIC_FORM(5, Duration.ofMinutes(10)),
+        // Calculadora do wizard: chamada a cada passo do formulário, por isso o
+        // limite tem de acomodar um preenchimento normal (7 passos + correções)
+        // sem deixar de travar scraping do motor de preços.
+        ESTIMATE(20, Duration.ofMinutes(1)),
         WRITE(30, Duration.ofMinutes(1)),
         GLOBAL(300, Duration.ofMinutes(1));
 
@@ -120,6 +128,25 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/auth/register")
                 || path.startsWith("/api/auth/password/")) {
             return Tier.AUTH;
+        }
+
+        // Angariação pública (/vender). Testado antes do tier WRITE genérico
+        // porque estes limites são propositadamente mais apertados.
+        if (isWriteMethod(method) && path.startsWith("/api/public/valuation/")) {
+            // A calculadora é chamada muitas vezes por um utilizador legítimo.
+            if (path.startsWith("/api/public/valuation/estimate")) {
+                return Tier.ESTIMATE;
+            }
+            // A submissão do pedido, uma só vez.
+            if (path.equals("/api/public/valuation/requests")) {
+                return Tier.PUBLIC_FORM;
+            }
+            // Verificação e reenvio do código ficam no tier WRITE: a proteção
+            // contra força bruta ao OTP é o contador de tentativas falhadas por
+            // pedido (mais forte do que um limite por IP), e o reenvio já tem
+            // cooldown de 60s na própria entidade. Apertar aqui só trancaria
+            // fora quem se engana a escrever o código.
+            return Tier.WRITE;
         }
 
         // Mutations on user-generated content
