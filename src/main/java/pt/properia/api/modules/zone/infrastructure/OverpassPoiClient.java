@@ -36,6 +36,13 @@ public class OverpassPoiClient {
     private static final Logger log = LoggerFactory.getLogger(OverpassPoiClient.class);
     static final int RADIUS_M = 500;
     private static final int OUTPUT_LIMIT = 500;
+    /**
+     * Raios grandes (imóveis sem morada exata) cobrem uma área muitas vezes maior,
+     * portanto o limite de 500 elementos seria atingido em qualquer zona urbana e as
+     * contagens sairiam truncadas sem que nada o indicasse.
+     */
+    private static final int OUTPUT_LIMIT_WIDE = 2000;
+    private static final int WIDE_RADIUS_THRESHOLD_M = 800;
 
     private final OverpassProperties props;
     private final ObjectMapper json;
@@ -53,29 +60,63 @@ public class OverpassPoiClient {
     public record CategoryResult(String categoryId, int totalCount, PoiItem nearest) {}
 
     /**
+     * Resultado da recolha.
+     *
+     * `truncated` diz que o Overpass devolveu tantos elementos quantos o limite
+     * permitia, ou seja, as contagens são um MÍNIMO e não um total. Sem esta
+     * bandeira, uma zona densa apareceria com menos serviços do que tem — um erro
+     * silencioso e do lado errado (subestima a zona sem nada o indicar).
+     */
+    public record ZoneFetch(List<CategoryResult> categories, boolean truncated) {}
+
+    /**
      * Fetches all zone categories in one Overpass request and classifies by tags.
      * Returns one CategoryResult per category (including those with 0 results).
      */
     public List<CategoryResult> fetchAll(double lat, double lng) {
-        var query = buildCombinedQuery(lat, lng);
+        return fetch(lat, lng, RADIUS_M).categories();
+    }
+
+    /**
+     * Igual a {@link #fetchAll}, mas com raio explícito: um imóvel conhecido apenas
+     * ao nível da freguesia precisa de uma amostra que cubra a freguesia, e não de
+     * um disco de 500 m à volta do centroide.
+     */
+    public ZoneFetch fetch(double lat, double lng, int radiusM) {
+        var outputLimit = radiusM > WIDE_RADIUS_THRESHOLD_M ? OUTPUT_LIMIT_WIDE : OUTPUT_LIMIT;
+        var query = buildCombinedQuery(lat, lng, radiusM, outputLimit);
         try {
             var elements = executeQuery(query, lat, lng);
-            return classifyAndAggregate(elements, lat, lng);
+            return new ZoneFetch(
+                classifyAndAggregate(elements, lat, lng),
+                elements.size() >= outputLimit);
         } catch (Exception e) {
             log.warn("Overpass combined fetch failed: {}", e.getMessage());
             // Return empty results for all categories rather than propagating
-            return CATEGORY_IDS.stream()
-                .map(id -> new CategoryResult(id, 0, null))
-                .toList();
+            return new ZoneFetch(
+                CATEGORY_IDS.stream().map(id -> new CategoryResult(id, 0, null)).toList(),
+                false);
         }
     }
 
     // ── Query construction ────────────────────────────────────────────────────
 
-    private String buildCombinedQuery(double lat, double lng) {
-        var around = String.format("(around:%d,%.6f,%.6f)", RADIUS_M, lat, lng);
+    /**
+     * Filtro espacial do Overpass.
+     *
+     * Locale.ROOT é obrigatório: com uma locale de vírgula decimal (pt-PT, a que corre
+     * nas máquinas de desenvolvimento) o %.6f produzia "41,191905" e a query inteira ia
+     * malformada — o Overpass respondia 400 e a zona ficava com 0 POIs, sem erro visível
+     * em lado nenhum, porque o cliente devolve listas vazias quando a chamada falha.
+     */
+    static String aroundClause(int radiusM, double lat, double lng) {
+        return String.format(Locale.ROOT, "(around:%d,%.6f,%.6f)", radiusM, lat, lng);
+    }
+
+    private String buildCombinedQuery(double lat, double lng, int radiusM, int outputLimit) {
+        var around = aroundClause(radiusM, lat, lng);
         var sb = new StringBuilder();
-        sb.append(String.format("[out:json][timeout:25];\n(\n"));
+        sb.append("[out:json][timeout:25];\n(\n");
 
         // Transportes
         sb.append("  node[\"railway\"~\"subway_entrance|station|halt|tram_stop\"]").append(around).append(";\n");
@@ -115,7 +156,7 @@ public class OverpassPoiClient {
         sb.append("  node[\"leisure\"~\"fitness_centre|sports_centre|sports_hall|swimming_pool\"]").append(around).append(";\n");
         sb.append("  way[\"leisure\"~\"fitness_centre|sports_centre|sports_hall|swimming_pool\"]").append(around).append(";\n");
 
-        sb.append(");\nout center tags qt ").append(OUTPUT_LIMIT).append(";\n");
+        sb.append(");\nout center tags qt ").append(outputLimit).append(";\n");
         return sb.toString();
     }
 
@@ -134,6 +175,9 @@ public class OverpassPoiClient {
         var response = http.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
             var body = response.body();
+            // Sem a query, um 400 do Overpass devolve só um cabeçalho XML e não há
+            // como saber o que estava malformado.
+            log.warn("Overpass rejeitou a query (HTTP {}):\n{}", response.statusCode(), query);
             throw new RuntimeException("Overpass HTTP " + response.statusCode()
                 + ": " + body.substring(0, Math.min(300, body.length())));
         }

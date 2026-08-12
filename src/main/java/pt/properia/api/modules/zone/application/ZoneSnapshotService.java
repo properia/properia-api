@@ -128,8 +128,13 @@ public class ZoneSnapshotService {
             return;
         }
 
-        // Fetch POIs from Overpass
-        var results = overpassClient.fetchAll(lat, lng);
+        // O raio acompanha a precisão da coordenada. Para uma morada exata, 500 m é a
+        // vizinhança a pé. Para um imóvel conhecido só pela freguesia, a coordenada é o
+        // centroide e a casa pode estar a mais de 1 km dele — um disco de 500 m à volta
+        // do centroide descreveria uma zona onde o imóvel provavelmente nem está.
+        var radiusM = radiusForPrecision(precision);
+        var fetch = overpassClient.fetch(lat, lng, radiusM);
+        var results = fetch.categories();
 
         // Build payload matching ListingZoneSummary contract
         var locationSnapshot = Map.of(
@@ -171,7 +176,8 @@ public class ZoneSnapshotService {
         var summaryShort = buildSummaryShort(results);
         var payload = new LinkedHashMap<String, Object>();
         payload.put("listingId",       listingId.toString());
-        payload.put("radiusM",         RADIUS_M);
+        payload.put("radiusM",         radiusM);
+        payload.put("countsTruncated", fetch.truncated());
         payload.put("source",          "overpass");
         payload.put("sourceVersion",   1);
         payload.put("processedAt",     Instant.now().toString());
@@ -210,7 +216,9 @@ public class ZoneSnapshotService {
             .param("summary", summaryShort)
             .update();
 
-        log.info("Zone snapshot processed for listing {} ({} POIs)", listingId, totalPois);
+        log.info("Zone snapshot processed for listing {} ({} POIs, raio {} m, precisão {}{})",
+            listingId, totalPois, radiusM, normalizePrecision(precision),
+            fetch.truncated() ? ", contagens truncadas" : "");
     }
 
     private UUID insertPendingSnapshot(UUID listingId, String fingerprint,
@@ -237,7 +245,7 @@ public class ZoneSnapshotService {
             """)
             .param("id", id)
             .param("lid", listingId)
-            .param("radius", RADIUS_M)
+            .param("radius", radiusForPrecision(precision))
             .param("fp", fingerprint)
             .param("locSnap", locationSnapshot)
             .update();
@@ -266,8 +274,17 @@ public class ZoneSnapshotService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * Identifica a localização, não o raio: o sufixo fixo é histórico e mantém-se para
+     * não invalidar os fingerprints já gravados. Uma mudança de precisão sem mudança de
+     * coordenadas continua a ser reprocessada, porque process() marca o snapshot
+     * existente como stale e volta a corrê-lo com o raio novo.
+     *
+     * Locale.ROOT porque uma locale de vírgula decimal geraria um fingerprint diferente
+     * para as mesmas coordenadas, duplicando snapshots entre ambientes.
+     */
     private static String buildFingerprint(double lat, double lng) {
-        return String.format("%.5f:%.5f:500", lat, lng);
+        return String.format(Locale.ROOT, "%.5f:%.5f:500", lat, lng);
     }
 
     private static Integer walkingMinutes(double distanceM) {
@@ -303,6 +320,23 @@ public class ZoneSnapshotService {
         if (categoriesWithPois <= 0) return "Zona residencial";
         if (categoriesWithPois == 1) return "1 tipo de serviço a menos de 500 m";
         return categoriesWithPois + " tipos de serviço a menos de 500 m";
+    }
+
+    /**
+     * Raio de recolha em função da precisão da coordenada.
+     *
+     * Freguesia e concelho recebem raios largos porque a coordenada é um centroide
+     * administrativo: o imóvel está algures naquela área, não naquele ponto. Uma
+     * união de freguesias como São Mamede de Infesta + Senhora da Hora tem cerca de
+     * 3 km de ponta a ponta, daí os 1500 m.
+     */
+    private static int radiusForPrecision(String precision) {
+        return switch (normalizePrecision(precision)) {
+            case "street"       -> RADIUS_M;
+            case "neighborhood" -> 800;
+            case "parish"       -> 1500;
+            default             -> 3000; // municipality
+        };
     }
 
     private static String normalizePrecision(String precision) {
