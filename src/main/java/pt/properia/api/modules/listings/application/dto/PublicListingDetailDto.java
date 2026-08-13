@@ -44,6 +44,11 @@ public record PublicListingDetailDto(
     String usageRestriction,
     String specialConditionSummary,
     boolean isSpecialCondition,
+    // Prédios de rendimento (V82)
+    Integer totalUnits,
+    BigDecimal monthlyIncomeTotal,
+    Object unitsBreakdown,
+    String legalStatusNote,
     String sunExposure,
     String city,
     String district,

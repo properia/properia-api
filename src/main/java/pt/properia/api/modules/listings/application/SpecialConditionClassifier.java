@@ -71,9 +71,15 @@ public class SpecialConditionClassifier {
     );
 
     private static final List<Pattern> TENANT_VITALICIO = List.of(
-        Pattern.compile("\\barrendamento vitalicio\\b"),
-        Pattern.compile("\\binquilino vitalicio\\b"),
-        Pattern.compile("\\bresidente vitalicio\\b"),
+        // Concordância de género: as fichas reais escrevem tanto "inquilino
+        // vitalício" como "inquilina vitalícia", e a variante feminina passava
+        // despercebida — um imóvel arrendado vitaliciamente era anunciado como
+        // venda normal. Veio de uma ficha com "contrato de inquilina vitalícia".
+        Pattern.compile("\\barrendamentos? vitalici[oa]s?\\b"),
+        Pattern.compile("\\barrendad[oa]s?[^.]{0,30}\\bvitalici[oa]s?\\b"),
+        Pattern.compile("\\binquilin[oa]s?\\s+vitalici[oa]s?\\b"),
+        Pattern.compile("\\bcontrato[^.]{0,30}\\binquilin[oa]s?\\s+vitalici[oa]s?\\b"),
+        Pattern.compile("\\bresidentes? vitalici[oa]s?\\b"),
         Pattern.compile("\\bdireito de habitacao vitalici"),
         Pattern.compile("\\busufrutuari")                     // quem detém usufruto continua a habitar
     );

@@ -103,6 +103,23 @@ public class Listing {
     @Column(name = "lot_area_m2", precision = 10, scale = 2)
     private BigDecimal lotAreaM2;
 
+    // Prédios de rendimento (V82). O que decide a compra de um prédio não é a
+    // tipologia mas o que ele rende e em que estado estão as frações.
+    @Column(name = "total_units")
+    private Integer totalUnits;
+
+    @Column(name = "monthly_income_total", precision = 12, scale = 2)
+    private BigDecimal monthlyIncomeTotal;
+
+    // Lista das frações, em JSON. É informação de apresentação, lida sempre em
+    // bloco com o anúncio — uma tabela filha traria joins a todas as leituras.
+    @Column(name = "units_breakdown", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String unitsBreakdown;
+
+    @Column(name = "legal_status_note")
+    private String legalStatusNote;
+
     // Condições especiais de aquisição (V76) — ver SpecialConditionClassifier.
     // is_special_condition NÃO está mapeada de propósito: é uma coluna GERADA na base
     // de dados a partir destas duas. Mapeá-la como campo escrevível deixaria o
@@ -459,6 +476,15 @@ public class Listing {
     public void setUsableAreaM2(BigDecimal usableAreaM2) { this.usableAreaM2 = usableAreaM2; }
     public void setGrossAreaM2(BigDecimal grossAreaM2) { this.grossAreaM2 = grossAreaM2; }
     public void setLotAreaM2(BigDecimal lotAreaM2) { this.lotAreaM2 = lotAreaM2; }
+
+    public Integer getTotalUnits() { return totalUnits; }
+    public void setTotalUnits(Integer totalUnits) { this.totalUnits = totalUnits; }
+    public BigDecimal getMonthlyIncomeTotal() { return monthlyIncomeTotal; }
+    public void setMonthlyIncomeTotal(BigDecimal v) { this.monthlyIncomeTotal = v; }
+    public String getUnitsBreakdown() { return unitsBreakdown; }
+    public void setUnitsBreakdown(String unitsBreakdown) { this.unitsBreakdown = unitsBreakdown; }
+    public String getLegalStatusNote() { return legalStatusNote; }
+    public void setLegalStatusNote(String legalStatusNote) { this.legalStatusNote = legalStatusNote; }
     public void setLandType(String landType) { this.landType = landType; }
     public void setCeilingHeightM(BigDecimal ceilingHeightM) { this.ceilingHeightM = ceilingHeightM; }
     public void setWaterSource(String waterSource) { this.waterSource = waterSource; }

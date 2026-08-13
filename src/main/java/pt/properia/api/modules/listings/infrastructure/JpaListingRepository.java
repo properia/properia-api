@@ -26,6 +26,7 @@ public class JpaListingRepository implements ListingRepository {
     private final ListingRoomDetailsJpaRepository roomDetails;
     private final ListingCommercialDetailsJpaRepository commercialDetails;
     private final JdbcClient jdbc;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public JpaListingRepository(
             ListingJpaRepository listings,
@@ -36,7 +37,9 @@ public class JpaListingRepository implements ListingRepository {
             ListingFeaturesJpaRepository features,
             ListingRoomDetailsJpaRepository roomDetails,
             ListingCommercialDetailsJpaRepository commercialDetails,
-            JdbcClient jdbc) {
+            JdbcClient jdbc,
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.listings = listings;
         this.media = media;
         this.locations = locations;
@@ -191,6 +194,7 @@ public class JpaListingRepository implements ListingRepository {
             l.getEnergyRating(), l.getAlRegistrationNumber(),
             l.getOwnershipType(), l.getUsageRestriction(), l.getSpecialConditionSummary(),
             l.isSpecialCondition(),
+            l.getTotalUnits(), l.getMonthlyIncomeTotal(), parseUnitsBreakdown(l.getUnitsBreakdown()), l.getLegalStatusNote(),
             l.getSunExposure(),
             l.getCity(), l.getDistrict(), l.getParish(), l.getNeighborhood(), l.getPostalCode(),
             l.getLatitude() != null ? l.getLatitude() : (loc != null ? loc.getLatitude() : null),
@@ -403,5 +407,19 @@ public class JpaListingRepository implements ListingRepository {
             .param("locationPrecision", input.locationPrecision())
             .param("hideExactLocation", input.hideExactLocation())
             .update();
+    }
+
+    /**
+     * A composição das frações sai da base como texto JSON. Devolve-se já
+     * desserializada para o cliente receber uma lista e não uma string com JSON
+     * lá dentro — que era o que acontecia se passasse em bruto.
+     */
+    private Object parseUnitsBreakdown(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return objectMapper.readValue(raw, Object.class);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

@@ -123,10 +123,34 @@ public class PatchListingService {
         if (body.containsKey("descriptionRaw")) listing.setDescriptionRaw(str(body, "descriptionRaw"));
         if (body.containsKey("descriptionShort")) listing.setDescriptionShort(str(body, "descriptionShort"));
 
+        // Declaração explícita do anunciante. Tem precedência sobre o classificador:
+        // quem está a vender sabe se o imóvel vem com inquilino vitalício, e nem
+        // sempre o escreve na descrição por palavras que o texto reconheça. Antes
+        // disto o campo era simplesmente ignorado — a UI enviava-o e a reclassificação
+        // a seguir sobrepunha-se, deixando o imóvel como venda normal.
+        boolean declaradoExplicitamente =
+            body.containsKey("ownershipType") || body.containsKey("usageRestriction");
+
+        if (declaradoExplicitamente) {
+            if (body.containsKey("ownershipType")) {
+                var v = str(body, "ownershipType");
+                listing.setOwnershipType(v != null ? v : SpecialConditionClassifier.OWNERSHIP_FULL);
+            }
+            if (body.containsKey("usageRestriction")) {
+                var v = str(body, "usageRestriction");
+                listing.setUsageRestriction(v != null ? v : SpecialConditionClassifier.RESTRICTION_NONE);
+            }
+            if (body.containsKey("specialConditionSummary")) {
+                listing.setSpecialConditionSummary(str(body, "specialConditionSummary"));
+            }
+        }
         // Reclassifica condições especiais quando o texto muda. Nos dois sentidos:
         // acrescentar "usufruto" passa a NUDE_OWNERSHIP, retirá-lo volta a FULL —
         // senão uma correção de descrição deixava o imóvel escondido para sempre.
-        if (body.containsKey("title") || body.containsKey("descriptionRaw") || body.containsKey("descriptionShort")) {
+        //
+        // Só corre quando NÃO houve declaração explícita neste pedido: caso contrário
+        // o classificador apagaria a escolha do anunciante feita no mesmo formulário.
+        else if (body.containsKey("title") || body.containsKey("descriptionRaw") || body.containsKey("descriptionShort")) {
             var sc = specialConditions.classify(
                 listing.getTitle(), listing.getDescriptionRaw(), listing.getDescriptionShort());
             listing.setOwnershipType(sc.ownershipType());
@@ -157,6 +181,22 @@ public class PatchListingService {
         if (body.containsKey("usableAreaM2")) listing.setUsableAreaM2(decimal(body, "usableAreaM2"));
         if (body.containsKey("grossAreaM2")) listing.setGrossAreaM2(decimal(body, "grossAreaM2"));
         if (body.containsKey("lotAreaM2")) listing.setLotAreaM2(decimal(body, "lotAreaM2"));
+        // Prédios de rendimento (V82).
+        if (body.containsKey("totalUnits")) {
+            var v = body.get("totalUnits");
+            listing.setTotalUnits(v == null ? null : Integer.valueOf(String.valueOf(v).trim()));
+        }
+        if (body.containsKey("monthlyIncomeTotal")) listing.setMonthlyIncomeTotal(decimal(body, "monthlyIncomeTotal"));
+        if (body.containsKey("legalStatusNote")) listing.setLegalStatusNote(str(body, "legalStatusNote"));
+        if (body.containsKey("unitsBreakdown")) {
+            var v = body.get("unitsBreakdown");
+            try {
+                // Chega como lista já desserializada; volta a JSON para a coluna jsonb.
+                listing.setUnitsBreakdown(v == null ? null : json.writeValueAsString(v));
+            } catch (Exception e) {
+                throw new DomainException("VALIDATION_ERROR", "Composição das frações inválida.", 422);
+            }
+        }
         if (body.containsKey("landType")) listing.setLandType(str(body, "landType"));
         if (body.containsKey("ceilingHeightM")) listing.setCeilingHeightM(decimal(body, "ceilingHeightM"));
         if (body.containsKey("waterSource")) listing.setWaterSource(str(body, "waterSource"));
