@@ -143,6 +143,16 @@ public class R2UploadService {
 
     // ── Operações ───────────────────────────────────────────────────────────────
 
+    /**
+     * Cache do lado do cliente e da CDN para os objectos de media.
+     *
+     * Um ano, imutável: a chave do objecto leva um UUID gerado por upload, por isso
+     * uma imagem NUNCA muda de conteúdo — substituí-la cria outra chave. O valor que
+     * o bucket usava por omissão eram 4 horas, o que obrigava a revalidar a galeria
+     * inteira várias vezes por dia sem qualquer benefício.
+     */
+    private static final String MEDIA_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
     /** Direct server-side upload to R2 — used when browser cannot do presigned PUT (CORS). */
     public String uploadBytes(String objectKey, byte[] bytes, String contentType) {
         var ct = (contentType != null && !contentType.isBlank()) ? contentType : "image/jpeg";
@@ -151,6 +161,7 @@ public class R2UploadService {
                 .bucket(props.getBucket())
                 .key(objectKey)
                 .contentType(ct)
+                .cacheControl(MEDIA_CACHE_CONTROL)
                 .build(),
             RequestBody.fromBytes(bytes)
         );
@@ -173,6 +184,7 @@ public class R2UploadService {
                 .bucket(props.getBucket())
                 .key(objectKey)
                 .contentType(ct)
+                .cacheControl(MEDIA_CACHE_CONTROL)
                 .contentLength(contentLength)
                 .build(),
             RequestBody.fromInputStream(in, contentLength)
@@ -188,6 +200,7 @@ public class R2UploadService {
             .bucket(props.getBucket())
             .key(objectKey)
             .contentType(contentType)
+            .cacheControl(MEDIA_CACHE_CONTROL)
             .build();
 
         var presignRequest = PutObjectPresignRequest.builder()
