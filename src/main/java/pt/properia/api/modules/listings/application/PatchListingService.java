@@ -190,6 +190,13 @@ public class PatchListingService {
         if (body.containsKey("legalStatusNote")) listing.setLegalStatusNote(str(body, "legalStatusNote"));
         if (body.containsKey("landFrontageM")) listing.setLandFrontageM(decimal(body, "landFrontageM"));
         if (body.containsKey("buildablePotential")) listing.setBuildablePotential(str(body, "buildablePotential"));
+        if (body.containsKey("priceOnRequest")) {
+            var sob = Boolean.parseBoolean(String.valueOf(body.get("priceOnRequest")));
+            listing.setPriceOnRequest(sob);
+            // A base proíbe ter os dois: sob consulta com valor deixaria a UI sem
+            // saber qual mostrar. Limpar aqui evita um 500 vindo do CHECK.
+            if (sob) listing.setPriceAmount(null);
+        }
         if (body.containsKey("unitsBreakdown")) {
             var v = body.get("unitsBreakdown");
             try {

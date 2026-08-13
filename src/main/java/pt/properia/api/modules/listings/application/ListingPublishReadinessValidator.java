@@ -40,7 +40,10 @@ public class ListingPublishReadinessValidator {
     public void assertReadyToPublish(Listing listing) {
         var missing = new ArrayList<String>();
 
-        if (listing.getPriceAmount() == null || listing.getPriceAmount().signum() <= 0) {
+        // "Sob consulta" é uma decisão comercial deliberada e dispensa o valor.
+        // Um preço simplesmente em falta continua a bloquear — são estados distintos.
+        if (!listing.isPriceOnRequest()
+                && (listing.getPriceAmount() == null || listing.getPriceAmount().signum() <= 0)) {
             missing.add("preço");
         }
         // Mesmo critério "OR" do cliente (cidade OU distrito OU freguesia) — não pedir mais do que ele.

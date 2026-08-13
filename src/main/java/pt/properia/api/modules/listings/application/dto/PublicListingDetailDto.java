@@ -51,6 +51,7 @@ public record PublicListingDetailDto(
     String legalStatusNote,
     BigDecimal landFrontageM,
     String buildablePotential,
+    boolean priceOnRequest,
     String sunExposure,
     String city,
     String district,

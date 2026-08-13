@@ -194,7 +194,7 @@ public class JpaListingRepository implements ListingRepository {
             l.getEnergyRating(), l.getAlRegistrationNumber(),
             l.getOwnershipType(), l.getUsageRestriction(), l.getSpecialConditionSummary(),
             l.isSpecialCondition(),
-            l.getTotalUnits(), l.getMonthlyIncomeTotal(), parseUnitsBreakdown(l.getUnitsBreakdown()), l.getLegalStatusNote(), l.getLandFrontageM(), l.getBuildablePotential(),
+            l.getTotalUnits(), l.getMonthlyIncomeTotal(), parseUnitsBreakdown(l.getUnitsBreakdown()), l.getLegalStatusNote(), l.getLandFrontageM(), l.getBuildablePotential(), l.isPriceOnRequest(),
             l.getSunExposure(),
             l.getCity(), l.getDistrict(), l.getParish(), l.getNeighborhood(), l.getPostalCode(),
             l.getLatitude() != null ? l.getLatitude() : (loc != null ? loc.getLatitude() : null),

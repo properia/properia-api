@@ -127,6 +127,10 @@ public class Listing {
     @Column(name = "buildable_potential")
     private String buildablePotential;
 
+    // Preço sob consulta (V85). Decisão deliberada de não anunciar valor.
+    @Column(name = "price_on_request", nullable = false)
+    private boolean priceOnRequest = false;
+
     // Condições especiais de aquisição (V76) — ver SpecialConditionClassifier.
     // is_special_condition NÃO está mapeada de propósito: é uma coluna GERADA na base
     // de dados a partir destas duas. Mapeá-la como campo escrevível deixaria o
@@ -496,6 +500,8 @@ public class Listing {
     public void setLandFrontageM(BigDecimal v) { this.landFrontageM = v; }
     public String getBuildablePotential() { return buildablePotential; }
     public void setBuildablePotential(String v) { this.buildablePotential = v; }
+    public boolean isPriceOnRequest() { return priceOnRequest; }
+    public void setPriceOnRequest(boolean v) { this.priceOnRequest = v; }
     public void setLandType(String landType) { this.landType = landType; }
     public void setCeilingHeightM(BigDecimal ceilingHeightM) { this.ceilingHeightM = ceilingHeightM; }
     public void setWaterSource(String waterSource) { this.waterSource = waterSource; }
