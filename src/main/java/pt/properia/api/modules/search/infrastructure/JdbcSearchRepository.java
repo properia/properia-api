@@ -538,10 +538,12 @@ public class JdbcSearchRepository implements SearchRepository {
         // preenchida pelo enriquecimento de zona).
 
         // ── Condições especiais de aquisição ─────────────────────────────────────
-        // Nua propriedade / quota parte / exploração turística ficam FORA da pesquisa
-        // por omissão: o preço anunciado não corresponde à compra plena do bem, pelo
-        // que aparecem como "pechinchas" e distorcem qualquer comparação de preço.
-        // Só entram quando o utilizador o pede explicitamente.
+        // Nua propriedade / quota parte / exploração turística APARECEM por omissão
+        // (ver SearchController), mas despromovidas no ranking: o preço anunciado não
+        // corresponde à compra plena do bem, pelo que a comparação directa distorce.
+        // Escondê-las por completo era pior — fazia sumir inventário legítimo sem
+        // explicação. Este ramo só corre quando o cliente pede explicitamente para as
+        // excluir.
         var specialTypes = p.specialConditionTypes();
         if (specialTypes != null && !specialTypes.isEmpty()) {
             // Interesse explícito num tipo concreto: mostra SÓ esses (é o que a pessoa

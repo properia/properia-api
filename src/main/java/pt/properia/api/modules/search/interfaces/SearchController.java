@@ -65,7 +65,13 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
             @RequestParam(required = false) String advertiserId,
-            @RequestParam(defaultValue = "false") boolean includeSpecialConditions,
+            // Aparecem por omissão, com o selo de aviso, e despromovidos no ranking
+            // (ver shouldPenalizeSpecial). Escondê-los fazia desaparecer inventário
+            // legítimo sem o anunciante perceber porquê — aconteceu com dois anúncios
+            // reais que sumiram da listagem assim que a inquilina vitalícia foi
+            // declarada. O comprador continua avisado: o selo e o aviso na ficha
+            // dizem-lhe o que está a comprar.
+            @RequestParam(defaultValue = "true") boolean includeSpecialConditions,
             @RequestParam(required = false) String specialConditionTypes,
             HttpServletRequest request) {
 
@@ -133,7 +139,13 @@ public class SearchController {
             @RequestParam(defaultValue = "false") boolean commercialHasExtractionSystem,
             @RequestParam(required = false) String commercialPermittedUse,
             @RequestParam(required = false) String advertiserId,
-            @RequestParam(defaultValue = "false") boolean includeSpecialConditions,
+            // Aparecem por omissão, com o selo de aviso, e despromovidos no ranking
+            // (ver shouldPenalizeSpecial). Escondê-los fazia desaparecer inventário
+            // legítimo sem o anunciante perceber porquê — aconteceu com dois anúncios
+            // reais que sumiram da listagem assim que a inquilina vitalícia foi
+            // declarada. O comprador continua avisado: o selo e o aviso na ficha
+            // dizem-lhe o que está a comprar.
+            @RequestParam(defaultValue = "true") boolean includeSpecialConditions,
             @RequestParam(required = false) String specialConditionTypes,
             HttpServletRequest request) {
 
