@@ -20,6 +20,18 @@ public class PublicAdvertiserController {
 
     // Cacheado (TTL 3 min): vitrine pública de agências, muda raramente.
     @org.springframework.cache.annotation.Cacheable(pt.properia.api.shared.infrastructure.CacheConfig.SHOWCASE)
+    /**
+     * Agências mostradas na home como prova social ("quem já usa a Properia").
+     *
+     * Duas exclusões, e nenhuma delas por nome — uma lista de nomes proibidos
+     * partia-se na primeira vez que alguém renomeasse uma conta:
+     *
+     *  1. Sem imóveis publicados não há nada para mostrar. Uma agência que ainda
+     *     não publicou não "usa" o portal aos olhos de quem visita, e contas
+     *     internas ou de teste caem naturalmente fora desta regra.
+     *  2. Opt-out explícito em settings->>'hideFromShowcase', para os casos que a
+     *     regra acima não apanha (uma conta interna que publique inventário real).
+     */
     @GetMapping("/api/public/advertisers/showcase")
     public ResponseEntity<?> showcase() {
         var items = jdbc.sql("""
@@ -29,6 +41,11 @@ public class PublicAdvertiserController {
                 WHERE a.is_active = true
                   AND a.advertiser_type != 'private_owner'
                   AND a.brand_name IS NOT NULL
+                  AND COALESCE(a.settings->>'hideFromShowcase', 'false') <> 'true'
+                  AND EXISTS (
+                      SELECT 1 FROM properia.listings l
+                      WHERE l.advertiser_id = a.id AND l.status = 'published'
+                  )
                 ORDER BY a.created_at ASC
                 LIMIT 30
                 """)
