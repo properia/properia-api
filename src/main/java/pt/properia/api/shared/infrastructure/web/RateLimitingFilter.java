@@ -22,8 +22,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * Tiers (per IP):
  *   AUTH    — login / register / password-reset  → 5 req / 60 s  (brute-force protection)
- *   WRITE   — mutations on listings, media, etc. → 30 req / 60 s
- *   GLOBAL  — all other /api/ paths              → 300 req / 60 s
+ *   MEDIA   — upload de fotos de um anúncio       → 150 req / 60 s
+ *   WRITE   — outras mutações (anúncios, leads…)  → 30 req / 60 s
+ *   GLOBAL  — all other /api/ paths               → 300 req / 60 s
  *
  * Rate-limit headers (X-RateLimit-*) are always returned so the client knows
  * how many tokens remain and when to retry.
@@ -59,7 +60,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     // ── Tier definitions ──────────────────────────────────────────────────────
 
-    private enum Tier {
+    /** Visível ao teste para trancar a ordem das regras de encaminhamento. */
+    enum Tier {
         AUTH(5, Duration.ofMinutes(1)),
         // Formulário público de angariação: submissão real e única por sessão de
         // um proprietário. Um humano não submete 6 avaliações em 10 minutos; um
@@ -69,6 +71,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         // limite tem de acomodar um preenchimento normal (7 passos + correções)
         // sem deixar de travar scraping do motor de preços.
         ESTIMATE(20, Duration.ofMinutes(1)),
+        // Carregamento de fotos de um anúncio. Um lote é legitimamente intenso: um
+        // anúncio normal traz 15–30 imagens, e cada uma pode gastar mais do que um
+        // pedido (sessão de upload + confirmação, ou o fallback pelo servidor). Com
+        // o limite de escrita de 30/min o lote batia no teto a meio e o anunciante
+        // via "Demasiados pedidos" a meio do carregamento — um caso real, não
+        // hipotético. Continua a ser um limite: 150/min trava automação, mas deixa
+        // passar qualquer galeria que uma pessoa carregue à mão.
+        MEDIA(150, Duration.ofMinutes(1)),
         WRITE(30, Duration.ofMinutes(1)),
         GLOBAL(300, Duration.ofMinutes(1));
 
@@ -119,7 +129,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private Tier resolveTier(HttpServletRequest req) {
+    Tier resolveTier(HttpServletRequest req) {
         var path   = req.getRequestURI();
         var method = req.getMethod();
 
@@ -149,11 +159,19 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             return Tier.WRITE;
         }
 
+        // Carregamento de imagens — antes do WRITE, senão nunca seria alcançado:
+        // estes caminhos também casam com os prefixos genéricos abaixo.
+        if (isWriteMethod(method) && (
+                path.startsWith("/api/media/")
+                || path.endsWith("/media/upload")
+                || path.matches("/api/advertiser/listings/[^/]+/media.*"))) {
+            return Tier.MEDIA;
+        }
+
         // Mutations on user-generated content
         if (isWriteMethod(method) && (
                 path.startsWith("/api/advertiser/")
                 || path.startsWith("/api/listings/")
-                || path.startsWith("/api/media/")
                 || path.startsWith("/api/leads")
                 || path.startsWith("/api/visitas"))) {
             return Tier.WRITE;
