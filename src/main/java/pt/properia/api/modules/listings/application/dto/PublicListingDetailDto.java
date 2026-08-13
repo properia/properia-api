@@ -49,6 +49,8 @@ public record PublicListingDetailDto(
     BigDecimal monthlyIncomeTotal,
     Object unitsBreakdown,
     String legalStatusNote,
+    BigDecimal landFrontageM,
+    String buildablePotential,
     String sunExposure,
     String city,
     String district,

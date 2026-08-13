@@ -120,6 +120,13 @@ public class Listing {
     @Column(name = "legal_status_note")
     private String legalStatusNote;
 
+    // Terrenos com potencial construtivo (V84).
+    @Column(name = "land_frontage_m", precision = 8, scale = 2)
+    private BigDecimal landFrontageM;
+
+    @Column(name = "buildable_potential")
+    private String buildablePotential;
+
     // Condições especiais de aquisição (V76) — ver SpecialConditionClassifier.
     // is_special_condition NÃO está mapeada de propósito: é uma coluna GERADA na base
     // de dados a partir destas duas. Mapeá-la como campo escrevível deixaria o
@@ -485,6 +492,10 @@ public class Listing {
     public void setUnitsBreakdown(String unitsBreakdown) { this.unitsBreakdown = unitsBreakdown; }
     public String getLegalStatusNote() { return legalStatusNote; }
     public void setLegalStatusNote(String legalStatusNote) { this.legalStatusNote = legalStatusNote; }
+    public BigDecimal getLandFrontageM() { return landFrontageM; }
+    public void setLandFrontageM(BigDecimal v) { this.landFrontageM = v; }
+    public String getBuildablePotential() { return buildablePotential; }
+    public void setBuildablePotential(String v) { this.buildablePotential = v; }
     public void setLandType(String landType) { this.landType = landType; }
     public void setCeilingHeightM(BigDecimal ceilingHeightM) { this.ceilingHeightM = ceilingHeightM; }
     public void setWaterSource(String waterSource) { this.waterSource = waterSource; }

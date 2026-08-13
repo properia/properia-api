@@ -188,6 +188,8 @@ public class PatchListingService {
         }
         if (body.containsKey("monthlyIncomeTotal")) listing.setMonthlyIncomeTotal(decimal(body, "monthlyIncomeTotal"));
         if (body.containsKey("legalStatusNote")) listing.setLegalStatusNote(str(body, "legalStatusNote"));
+        if (body.containsKey("landFrontageM")) listing.setLandFrontageM(decimal(body, "landFrontageM"));
+        if (body.containsKey("buildablePotential")) listing.setBuildablePotential(str(body, "buildablePotential"));
         if (body.containsKey("unitsBreakdown")) {
             var v = body.get("unitsBreakdown");
             try {
