@@ -29,6 +29,8 @@ public record ListingSearchItemDto(
     BigDecimal usableAreaM2,
     BigDecimal grossAreaM2,
     BigDecimal lotAreaM2,
+    /** Sem valor anunciado por decisão do anunciante — o cartão mostra "Sob consulta". */
+    boolean priceOnRequest,
     String city,
     String district,
     String parish,
@@ -92,7 +94,7 @@ public record ListingSearchItemDto(
             visibilityStatus, isFeatured, priceAmount, priceCurrency,
             condoFee, propertyTaxAnnual, municipalTaxEstimate, depositRequired,
             bedrooms, bathrooms, suites, garageSpaces, parkingSpaces,
-            usableAreaM2, grossAreaM2, lotAreaM2,
+            usableAreaM2, grossAreaM2, lotAreaM2, priceOnRequest,
             city, district, parish, neighborhood, street, postalCode, locationPrecision,
             latitude, longitude, heroImageUrl, imageUrls, floorPlanUrl, youtubeVideoUrl,
             descriptionShort, energyRating, conditionStatus, furnishedStatus,
