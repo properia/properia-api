@@ -132,9 +132,13 @@ public class AdvertiserListingController {
     public ResponseEntity<?> patch(
             @PathVariable UUID id,
             @AuthenticationPrincipal JwtClaims claims,
+            // Qual ecrã fez a edição. O wizard e o painel de listagens enviam PATCHes
+            // com formatos muito diferentes (um manda o formulário todo, o outro um
+            // campo só) e sem isto a auditoria não distingue os dois.
+            @RequestHeader(name = "X-Properia-Edit-Source", required = false) String editSource,
             @RequestBody Map<String, Object> body) {
         var advertiserId = resolveAdvertiserId(claims);
-        var result = patchListingService.patch(id, advertiserId, claims.userId(), body);
+        var result = patchListingService.patch(id, advertiserId, claims.userId(), body, editSource);
         return ResponseEntity.ok(Map.of("data", result));
     }
 

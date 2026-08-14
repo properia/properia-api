@@ -32,6 +32,7 @@ public class PatchListingService {
     private final ListingPublishReadinessValidator readinessValidator;
     private final BuyerService buyerService;
     private final SpecialConditionClassifier specialConditions;
+    private final ListingAuditService audit;
 
     // Campos cuja alteração pode mudar a compatibilidade com critérios de compradores
     // (ver BuyerService.score()) — usados para decidir se vale a pena recalcular matches.
@@ -44,7 +45,8 @@ public class PatchListingService {
                                 ZoneSnapshotService zoneSnapshotService,
                                 ListingPublishReadinessValidator readinessValidator,
                                 BuyerService buyerService,
-                                SpecialConditionClassifier specialConditions) {
+                                SpecialConditionClassifier specialConditions,
+                                ListingAuditService audit) {
         this.repository = repository;
         this.jdbc = jdbc;
         this.json = json;
@@ -52,15 +54,27 @@ public class PatchListingService {
         this.readinessValidator = readinessValidator;
         this.buyerService = buyerService;
         this.specialConditions = specialConditions;
+        this.audit = audit;
     }
 
     private static final Set<String> ROLES_ALLOWED_TO_REASSIGN = Set.of("owner", "admin");
 
-    @SuppressWarnings("unchecked")
     public Map<String, Object> patch(UUID listingId, UUID advertiserId, UUID requestorUserId, Map<String, Object> body) {
+        return patch(listingId, advertiserId, requestorUserId, body, "unknown");
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> patch(UUID listingId, UUID advertiserId, UUID requestorUserId,
+                                     Map<String, Object> body, String changeSource) {
         var listing = repository.findByIdAndAdvertiserId(listingId, advertiserId)
             .orElseThrow(() -> DomainException.notFound("Anúncio não encontrado."));
         final BigDecimal priceBeforePatch = listing.getPriceAmount();
+
+        // Estado completo antes de tocar em nada. Tem de ser lido aqui em cima: a
+        // partir da primeira atribuição abaixo a entidade gerida já está mutada e
+        // o "antes" deixa de existir em qualquer sítio.
+        final Map<String, Object> auditBefore = snapshotForAudit(listingId, advertiserId);
+        final Set<String> requestKeys = Set.copyOf(body.keySet());
 
         // ── Status ────────────────────────────────────────────────────────────
         // "published" é adiado: a validação de prontidão (preço/fotos/localização/descrição)
@@ -648,7 +662,28 @@ public class PatchListingService {
             resp.put("commercialDetails", cd);
         }
 
+        // Rasto da edição. Vai depois de tudo — incluindo as sub-entidades, que são
+        // escritas por SQL directo e não passam pela entidade — para o "depois"
+        // reflectir o que ficou mesmo na base de dados.
+        audit.recordPatch(listingId, requestorUserId, changeSource,
+                          auditBefore, snapshotForAudit(listingId, advertiserId), requestKeys);
+
         return resp;
+    }
+
+    /**
+     * Fotografia completa do anúncio no vocabulário do formulário de edição.
+     * Reutiliza {@link #getForEdit} de propósito: é a mesma vista que o wizard
+     * carrega e devolve, portanto um diff sobre ela fala a mesma língua do PATCH
+     * e é directamente comparável com as chaves recebidas.
+     */
+    private Map<String, Object> snapshotForAudit(UUID listingId, UUID advertiserId) {
+        try {
+            return getForEdit(listingId, advertiserId);
+        } catch (Exception e) {
+            log.warn("listing_audit: não foi possível fotografar o anúncio {}: {}", listingId, e.toString());
+            return null;
+        }
     }
 
     // ── Read full listing for edit ────────────────────────────────────────────
@@ -722,6 +757,19 @@ public class PatchListingService {
         resp.put("tvCabo", l.getTvCabo());
         resp.put("fossaSeptica", l.getFossaSeptica());
 
+        // Os cinco blocos abaixo escrevem em `resp` de dentro do RowMapper e usam o
+        // `Optional` só para saber se a linha existia. Por isso o mapper TEM de
+        // devolver um valor não-nulo: `optional()` embrulha o retorno em
+        // `Optional.ofNullable`, e um mapper que devolvesse null daria um Optional
+        // vazio mesmo com linha na tabela — o ramo `else` corria a seguir e repunha
+        // a null tudo o que o mapper acabara de preencher.
+        //
+        // Era exactamente isso que acontecia, e foi assim que o wizard destruiu
+        // dados do cliente: este endpoint devolvia rua, código postal, condomínio,
+        // IMI, caução, vídeo e certificado energético sempre a null; o formulário
+        // abria com os campos vazios; e ao gravar mandava esses nulls de volta.
+        // Ninguém tinha de tocar nos campos para os perder.
+
         // Zone scores
         jdbc.sql("""
             SELECT zone_label_primary, zone_summary_short
@@ -730,7 +778,7 @@ public class PatchListingService {
             .query((rs, n) -> {
                 resp.put("zoneLabelPrimary", rs.getString("zone_label_primary"));
                 resp.put("zoneSummaryShort", rs.getString("zone_summary_short"));
-                return null;
+                return Boolean.TRUE;
             }).optional().ifPresentOrElse(
                 ignored -> {},
                 () -> { resp.put("zoneLabelPrimary", null); resp.put("zoneSummaryShort", null); }
@@ -747,7 +795,7 @@ public class PatchListingService {
                 resp.put("street", rs.getString("street"));
                 resp.put("locationPrecision", rs.getString("location_precision"));
                 resp.put("municipality", rs.getString("municipality"));
-                return null;
+                return Boolean.TRUE;
             }).optional().ifPresentOrElse(
                 ignored -> {},
                 () -> { resp.put("street", null); resp.put("locationPrecision", null); resp.put("municipality", null); }
@@ -767,7 +815,7 @@ public class PatchListingService {
                 resp.put("depositRequired", dr != null ? dr.toPlainString() : null);
                 resp.put("propertyTaxAnnual", pt != null ? pt.toPlainString() : null);
                 resp.put("maintenanceCostEstimate", mc != null ? mc.toPlainString() : null);
-                return null;
+                return Boolean.TRUE;
             }).optional().ifPresentOrElse(
                 ignored -> {},
                 () -> {
@@ -789,7 +837,7 @@ public class PatchListingService {
                 resp.put("energyCertificateNumber", rs.getString("energy_certificate_number"));
                 resp.put("energyCertificateValidUntil", until != null ? until.toLocalDate().toString() : null);
                 resp.put("energyCertificateExemptionReason", rs.getString("energy_certificate_exemption_reason"));
-                return null;
+                return Boolean.TRUE;
             }).optional().ifPresentOrElse(
                 ignored -> {},
                 () -> {
@@ -818,7 +866,7 @@ public class PatchListingService {
                 resp.put("youtubeVideoUrl", rs.getString("youtube_tour_url"));
                 resp.put("virtualTourUrl", rs.getString("virtual_tour_url"));
                 resp.put("virtualTourStatus", rs.getString("virtual_tour_status"));
-                return null;
+                return Boolean.TRUE;
             }).optional().ifPresentOrElse(
                 ignored -> {},
                 () -> { resp.put("youtubeVideoUrl", null); resp.put("virtualTourUrl", null); resp.put("virtualTourStatus", null); }
