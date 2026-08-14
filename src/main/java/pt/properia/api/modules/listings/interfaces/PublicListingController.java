@@ -244,7 +244,7 @@ public class PublicListingController {
 
         var b = base.get();
         var items = jdbc.sql("""
-                SELECT id, public_id, title, price_amount, price_currency, usable_area_m2,
+                SELECT id, public_id, title, price_amount, price_currency, price_on_request, usable_area_m2,
                        bedrooms, property_type, business_type, city, neighborhood,
                        hero_image_url, published_at,
                        (SELECT COUNT(*) FROM properia.listing_detail_views dv WHERE dv.listing_id = l.id) AS detail_views_total
@@ -267,6 +267,7 @@ public class PublicListingController {
                 m.put("title", rs.getString("title"));
                 m.put("priceAmount", rs.getObject("price_amount"));
                 m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                m.put("priceOnRequest", rs.getBoolean("price_on_request"));
                 m.put("usableAreaM2", rs.getObject("usable_area_m2"));
                 m.put("bedrooms", rs.getInt("bedrooms"));
                 m.put("propertyType", rs.getString("property_type"));
@@ -341,6 +342,7 @@ public class PublicListingController {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("priceAmount", rs.getObject("price_amount"));
                 m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                m.put("priceOnRequest", rs.getBoolean("price_on_request"));
                 m.put("status", rs.getString("status"));
                 m.put("refDate", rs.getTimestamp("ref_date") != null
                     ? rs.getTimestamp("ref_date").toInstant().toString() : null);
@@ -430,7 +432,7 @@ public class PublicListingController {
     public ResponseEntity<?> getFeaturedListings() {
         var items = jdbc.sql("""
                 SELECT l.id, l.public_id, l.title, l.business_type, l.property_type,
-                       l.price_amount, l.price_currency, l.bedrooms, l.bathrooms,
+                       l.price_amount, l.price_currency, l.price_on_request, l.bedrooms, l.bathrooms,
                        l.usable_area_m2, l.hero_image_url, l.is_featured, l.status,
                        l.published_at, l.updated_at, l.city, l.district, l.neighborhood,
                        l.parish, l.postal_code, l.latitude, l.longitude,
@@ -460,6 +462,7 @@ public class PublicListingController {
                 m.put("propertyType", rs.getString("property_type"));
                 m.put("priceAmount", rs.getObject("price_amount"));
                 m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                m.put("priceOnRequest", rs.getBoolean("price_on_request"));
                 m.put("bedrooms", rs.getInt("bedrooms"));
                 m.put("bathrooms", rs.getObject("bathrooms"));
                 m.put("suites", rs.getObject("suites"));
@@ -620,7 +623,7 @@ public class PublicListingController {
         var loc = "%" + location.trim().toLowerCase() + "%";
 
         var items = jdbc.sql("""
-                SELECT id, public_id, title, price_amount, price_currency, usable_area_m2,
+                SELECT id, public_id, title, price_amount, price_currency, price_on_request, usable_area_m2,
                        bedrooms, property_type, business_type, city, neighborhood,
                        hero_image_url, published_at
                 FROM properia.listings
@@ -646,6 +649,7 @@ public class PublicListingController {
                 m.put("title", rs.getString("title"));
                 m.put("priceAmount", rs.getObject("price_amount"));
                 m.put("priceCurrency", Optional.ofNullable(rs.getString("price_currency")).orElse("EUR"));
+                m.put("priceOnRequest", rs.getBoolean("price_on_request"));
                 m.put("usableAreaM2", rs.getObject("usable_area_m2"));
                 m.put("bedrooms", rs.getInt("bedrooms"));
                 m.put("propertyType", rs.getString("property_type"));
