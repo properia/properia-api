@@ -131,7 +131,8 @@ public class JdbcSearchRepository implements SearchRepository {
               lm.image_urls_arr,
               l.description_short,
               l.energy_rating,
-              l.condition_final, l.furnished_final,
+              COALESCE(l.condition_final, l.condition_declared) AS condition_final,
+              COALESCE(l.furnished_final, l.furnished_declared) AS furnished_final,
               l.has_garage, l.has_private_parking,
               l.has_balcony, l.has_terrace, l.has_garden,
               l.has_pool, l.has_elevator, l.has_natural_light,
@@ -358,17 +359,25 @@ public class JdbcSearchRepository implements SearchRepository {
         }
 
         // Furnished status (mobilia)
+        //
+        // furnished_final destinava-se a um passo de reconciliação entre o que o
+        // anunciante declara e o que a IA de visão eventualmente detectar nas
+        // fotos — mas esse passo nunca chegou a ser implementado (nenhum
+        // setFurnishedFinal em todo o backend) e a coluna fica sempre NULL. Filtrar
+        // só por ela devolvia sempre zero resultados, para qualquer anúncio. O
+        // COALESCE usa o declarado enquanto o final não existir, e passa a usar o
+        // final automaticamente no dia em que essa reconciliação for construída.
         if (p.mobilia() != null && !p.mobilia().isEmpty()) {
             var mapped = p.mobilia().stream().map(this::mapMobilia).filter(m -> m != null).toList();
             if (!mapped.isEmpty()) {
-                parts.add("l.furnished_final::text = ANY(:mobilia)");
+                parts.add("COALESCE(l.furnished_final, l.furnished_declared)::text = ANY(:mobilia)");
                 params.put("mobilia", mapped.toArray(String[]::new));
             }
         }
 
-        // Condition status
+        // Condition status — mesma situação de furnished_final, ver comentário acima.
         if (p.conditionStatus() != null && !p.conditionStatus().isEmpty()) {
-            parts.add("l.condition_final::text = ANY(:conditionStatus)");
+            parts.add("COALESCE(l.condition_final, l.condition_declared)::text = ANY(:conditionStatus)");
             params.put("conditionStatus", p.conditionStatus().toArray(String[]::new));
         }
 

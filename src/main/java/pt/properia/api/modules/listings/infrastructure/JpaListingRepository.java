@@ -183,7 +183,14 @@ public class JpaListingRepository implements ListingRepository {
         return new PublicListingDetailDto(
             l.getId(), l.getPublicId(), l.getAdvertiserId(),
             l.getStatus(), l.getBusinessType(), l.getPropertyType(), l.getPropertySubtype(),
-            l.getConditionFinal(), l.getFurnishedFinal(),
+            // condition_final/furnished_final destinavam-se a uma reconciliação
+            // declarado+IA que nunca foi implementada (nenhum setConditionFinal em
+            // todo o backend) — ficam sempre null. Sem este fallback a ficha pública
+            // nunca mostrava o estado do imóvel, mesmo quando o anunciante o
+            // declarou. Mesmo ajuste feito em JdbcSearchRepository e
+            // PublicListingController.
+            l.getConditionFinal() != null ? l.getConditionFinal() : l.getConditionDeclared(),
+            l.getFurnishedFinal() != null ? l.getFurnishedFinal() : l.getFurnishedDeclared(),
             l.getTitle(), l.getDescriptionRaw(), l.getDescriptionShort(),
             l.getPriceAmount(), l.getPriceCurrency(),
             l.getBedrooms(), l.getBathrooms(), l.getSuites(),
