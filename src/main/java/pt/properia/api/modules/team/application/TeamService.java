@@ -27,16 +27,19 @@ public class TeamService {
     private final AdvertiserTeamInviteJpaRepository inviteRepo;
     private final JdbcClient jdbc;
     private final AuthEmailService emailService;
+    private final TeamPermissionGuard permissionGuard;
     private final SecureRandom rng = new SecureRandom();
 
     public TeamService(AdvertiserUserJpaRepository memberRepo,
                        AdvertiserTeamInviteJpaRepository inviteRepo,
                        JdbcClient jdbc,
-                       AuthEmailService emailService) {
+                       AuthEmailService emailService,
+                       TeamPermissionGuard permissionGuard) {
         this.memberRepo = memberRepo;
         this.inviteRepo = inviteRepo;
         this.jdbc = jdbc;
         this.emailService = emailService;
+        this.permissionGuard = permissionGuard;
     }
 
     // ── Member records with user info ─────────────────────────────────────────
@@ -212,15 +215,7 @@ public class TeamService {
         if (role == null || !Set.of("admin", "editor", "sales", "viewer").contains(role))
             throw new DomainException("BAD_REQUEST", "Role inválida.", 400);
 
-        // Only owner/admin can add directly
-        var requestorRole = jdbc.sql("""
-                SELECT membership_role FROM properia.advertiser_users
-                WHERE advertiser_id = :adv AND user_id = :uid
-                """).param("adv", advertiserId).param("uid", requestorUserId)
-            .query(String.class).optional()
-            .orElseThrow(() -> new DomainException("FORBIDDEN", "Sem permissão.", 403));
-        if (!Set.of("owner", "admin").contains(requestorRole))
-            throw new DomainException("FORBIDDEN", "Apenas owner ou admin podem adicionar membros directamente.", 403);
+        permissionGuard.requireOwnerOrAdmin(advertiserId, requestorUserId);
 
         var finalEmail = email.trim().toLowerCase();
         var userId = jdbc.sql("SELECT id FROM properia.app_users WHERE email = :email")

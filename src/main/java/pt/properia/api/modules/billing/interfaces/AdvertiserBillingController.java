@@ -249,6 +249,12 @@ public class AdvertiserBillingController {
     private Map<String, Object> capabilities(String planCode) {
         boolean isPro = "pro".equals(planCode) || "business".equals(planCode) || "pilot".equals(planCode);
         boolean isBusiness = "business".equals(planCode);
+        // pilot tem de ter vagas de equipa ilimitadas, tal como o gate real em
+        // TeamController.assertTeamSlotAvailable já trata. Isto é deliberadamente
+        // um booleano à parte de isBusiness — as restantes capacidades (listagens,
+        // destaques, etc.) continuam ligadas só a Business, por decisão de negócio;
+        // só o tecto de membros de equipa tinha esta discrepância.
+        boolean isUnlimitedSeats = "business".equals(planCode) || "pilot".equals(planCode);
         var caps = new LinkedHashMap<String, Object>();
         caps.put("maxListings", isBusiness ? -1 : isPro ? 15 : 5);
         caps.put("maxFeaturedListings", isBusiness ? 10 : isPro ? 3 : 0);
@@ -258,7 +264,7 @@ public class AdvertiserBillingController {
         caps.put("pipeline", isPro);
         caps.put("chat", isPro);
         caps.put("leadExport", isBusiness ? "full" : isPro ? "csv" : "none");
-        caps.put("maxTeamMembers", isBusiness ? -1 : isPro ? 5 : 1);
+        caps.put("maxTeamMembers", isUnlimitedSeats ? -1 : isPro ? 5 : 1);
         caps.put("analytics", isPro);
         caps.put("analyticsExport", isBusiness);
         caps.put("maxOnlineVisitsPerMonth", isBusiness ? -1 : isPro ? 20 : 5);

@@ -1,5 +1,7 @@
 package pt.properia.api.modules.billing.application;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.stripe.Stripe;
 import com.stripe.model.Customer;
 import com.stripe.model.Event;
@@ -19,6 +21,8 @@ import java.util.UUID;
 
 @Service
 public class BillingService {
+
+    private static final Logger log = LoggerFactory.getLogger(BillingService.class);
 
     private final StripeProperties stripeProps;
     private final AdvertiserBillingRepository billingRepo;
@@ -336,9 +340,14 @@ public class BillingService {
             billingRepo.patchBillingMetadata(advertiserId, patch);
 
             if ("cancelled".equals(paymentStatus)) {
-                billingRepo.updatePlanCode(advertiserId, "free");
+                // "starter", não "free" — plan_code só tem starter/pro/business/pilot
+                // em todo o resto do sistema; "free" caía nos ramos "else" das
+                // funções de capacidades por coincidência, não por ser um valor válido.
+                billingRepo.updatePlanCode(advertiserId, "starter");
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.error("Erro ao processar webhook de subscrição Stripe (subscription.updated)", e);
+        }
     }
 
     private void handleSubscriptionDeleted(Event event) {
@@ -346,9 +355,11 @@ public class BillingService {
             var subscription = (com.stripe.model.Subscription) event.getDataObjectDeserializer()
                 .getObject().orElseThrow();
             var advertiserId = UUID.fromString(subscription.getMetadata().get("advertiserId"));
-            billingRepo.updatePlanCode(advertiserId, "free");
+            billingRepo.updatePlanCode(advertiserId, "starter");
             billingRepo.patchBillingMetadata(advertiserId, Map.of("paymentStatus", "cancelled"));
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.error("Erro ao processar webhook de subscrição Stripe (subscription.deleted)", e);
+        }
     }
 
     private String derivePaymentStatus(String status) {

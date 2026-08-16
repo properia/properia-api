@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import pt.properia.api.modules.team.application.TeamPermissionGuard;
 import pt.properia.api.shared.domain.DomainException;
 import pt.properia.api.shared.infrastructure.web.jwt.JwtClaims;
 
@@ -18,9 +19,11 @@ import java.util.UUID;
 public class TeamInvitePublicController {
 
     private final JdbcClient jdbc;
+    private final TeamPermissionGuard permissionGuard;
 
-    public TeamInvitePublicController(JdbcClient jdbc) {
+    public TeamInvitePublicController(JdbcClient jdbc, TeamPermissionGuard permissionGuard) {
         this.jdbc = jdbc;
+        this.permissionGuard = permissionGuard;
     }
 
     @GetMapping("/{token}")
@@ -108,6 +111,12 @@ public class TeamInvitePublicController {
         if (existing) {
             throw new DomainException("CONFLICT", "Já fazes parte desta equipa.", 409);
         }
+
+        // Revalida o tecto de vagas no momento da aceitação, não só na criação do
+        // convite: se o plano baixou de escalão enquanto este convite esteve
+        // pendente, aceitá-lo agora não pode empurrar a equipa para além do tecto
+        // do plano actual.
+        permissionGuard.requireSeatAvailable(advertiserId);
 
         // Create membership and mark invite accepted
         jdbc.sql("""
